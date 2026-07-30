@@ -1,0 +1,8 @@
+{
+  "name": "Remix: マーチングコンテメーカー",
+  "description": "マーチングバンドのドリルフォーメーション（コンテ）を作成・編集・アニメーション再生・保存できるフルスタックWebアプリです。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

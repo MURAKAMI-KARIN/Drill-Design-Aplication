@@ -1,0 +1,67 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Formation {
+  id               Int      @id @default(autoincrement())
+  title            String
+  music            String
+  bpm              Int
+  fieldWidth       Int      @default(128)
+  fieldHeight      Int      @default(64)
+  markingShape     String   @default("cross")
+  markingIntervalX Int      @default(16)
+  markingIntervalY Int      @default(16)
+  markingCountX    Int      @default(9)
+  markingCountY    Int      @default(5)
+  backgroundColor  String?  @default("#1e4620")
+  markerColor      String?  @default("#ef4444")
+  showYardLines    Boolean? @default(true)
+  showYardNumbers  Boolean? @default(true)
+  showGridLines    Boolean? @default(true)
+  customMarkers    String?  @default("[]")
+  sets             Set[]
+  createdAt        DateTime @default(now())
+}
+
+model Set {
+  id          Int        @id @default(autoincrement())
+  formation   Formation  @relation(fields: [formationId], references: [id], onDelete: Cascade)
+  formationId Int
+  number      Int
+  counts      Int
+  bpm         Int?
+  positions   Position[]
+  createdAt   DateTime   @default(now())
+}
+
+model Member {
+  id         Int        @id @default(autoincrement())
+  name       String
+  instrument String
+  color      String
+  positions  Position[]
+  createdAt  DateTime   @default(now())
+}
+
+model Position {
+  id       Int    @id @default(autoincrement())
+  member   Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId Int
+  set      Set    @relation(fields: [setId], references: [id], onDelete: Cascade)
+  setId    Int
+  x        Float
+  y        Float
+
+  @@unique([memberId, setId])
+}
