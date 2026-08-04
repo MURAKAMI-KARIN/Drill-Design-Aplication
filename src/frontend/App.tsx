@@ -1908,34 +1908,63 @@ export default function App() {
   }, [activeFormation, members]);
 
   if (isPrintMode && activeFormation) {
+    const handleTriggerPrint = () => {
+      try {
+        window.focus();
+        window.print();
+      } catch (err) {
+        console.error("Print trigger failed:", err);
+        alert("印刷ダイアログの起動に失敗しました。キーボードの Ctrl + P (Macは Cmd + P) を押して印刷してください。");
+      }
+    };
+
     return (
-      <div className="min-h-screen bg-slate-800 text-slate-100 p-4 font-sans flex flex-col items-center">
-        {/* Style block for clean printing */}
+      <div className="print-wrapper min-h-screen bg-slate-800 text-slate-100 p-4 font-sans flex flex-col items-center">
+        {/* Style block for clean A4 printing */}
         <style dangerouslySetInnerHTML={{ __html: `
           @media print {
-            body {
-              background: white !important;
-              color: black !important;
+            @page {
+              size: A4 portrait;
+              margin: 0;
+            }
+            html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              color: #000000 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
             .no-print {
               display: none !important;
             }
+            .print-wrapper {
+              background: #ffffff !important;
+              padding: 0 !important;
+              margin: 0 !important;
+              min-height: auto !important;
+              width: 100% !important;
+            }
             .print-page {
               width: 210mm !important;
               height: 297mm !important;
+              max-height: 297mm !important;
               page-break-after: always !important;
+              break-after: page !important;
               box-sizing: border-box !important;
-              margin: 0 !important;
+              margin: 0 auto !important;
               padding: 10mm !important;
-              background: white !important;
-              color: black !important;
+              background: #ffffff !important;
+              color: #000000 !important;
               display: flex !important;
               flex-direction: column !important;
               justify-content: space-between !important;
               position: relative !important;
+              border: none !important;
+              box-shadow: none !important;
             }
             .marching-canvas-print {
-              border: 2px solid #000 !important;
+              border: 2px solid #000000 !important;
               border-radius: 0 !important;
               outline: none !important;
               box-shadow: none !important;
@@ -1946,10 +1975,10 @@ export default function App() {
         ` }} />
 
         {/* Top bar for Print Mode Controls */}
-        <div className="no-print w-full max-w-5xl bg-slate-900 border border-slate-700 p-4 rounded-xl flex items-center justify-between mb-6 shadow-2xl">
-          <div className="flex items-center gap-4">
+        <div className="no-print w-full max-w-5xl bg-slate-900 border border-slate-700 p-4 rounded-xl flex flex-wrap items-center justify-between gap-4 mb-6 shadow-2xl">
+          <div className="flex items-center gap-4 flex-wrap">
             <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
-              <span>印刷プレビュー</span>
+              <span>印刷プレビュー (A4ドリルシート)</span>
             </h2>
             <div className="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
               <label className="text-xs text-slate-300 font-bold">部員選択:</label>
@@ -1966,20 +1995,25 @@ export default function App() {
                 ))}
               </select>
             </div>
+            <span className="text-[11px] text-slate-400">
+              ※ 送信先で「PDFに保存」を選択するとPDFファイルとしてダウンロードできます
+            </span>
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => window.print()}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow transition flex items-center gap-1.5"
+              type="button"
+              onClick={handleTriggerPrint}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-5 py-2.5 rounded-lg shadow-lg hover:shadow-blue-500/20 transition flex items-center gap-2 cursor-pointer"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
               </svg>
-              <span>印刷する</span>
+              <span>今すぐ印刷 / PDF保存</span>
             </button>
             <button
+              type="button"
               onClick={() => setIsPrintMode(false)}
-              className="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-4 py-2 rounded-lg transition"
+              className="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition"
             >
               閉じる
             </button>
