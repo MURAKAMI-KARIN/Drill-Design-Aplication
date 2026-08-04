@@ -363,10 +363,18 @@ export default function App() {
       const res = await fetch("/api/formations");
       if (res.ok) {
         const data = await res.json();
-        setFormations(data);
+        if (Array.isArray(data) && data.length > 0) {
+          setFormations(data);
+          localStorage.setItem("drillflow_local_formations", JSON.stringify(data));
+          return;
+        }
       }
     } catch (error) {
       console.error("Failed to fetch formations:", error);
+    }
+    const saved = localStorage.getItem("drillflow_local_formations");
+    if (saved) {
+      try { setFormations(JSON.parse(saved)); } catch (e) {}
     }
   };
 
@@ -377,196 +385,236 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setMembers(data);
+        localStorage.setItem("drillflow_local_members", JSON.stringify(data));
+        return;
       }
     } catch (error) {
       console.error("Failed to fetch members:", error);
+    }
+    const saved = localStorage.getItem("drillflow_local_members");
+    if (saved) {
+      try { setMembers(JSON.parse(saved)); } catch (e) {}
     }
   };
 
   // API: フォーメーション詳細取得
   const loadFormation = async (id: number) => {
+    let formation: any = null;
+    let loadedMembers: Member[] = [];
+
     try {
       const res = await fetch(`/api/formations/${id}`);
       if (res.ok) {
-        const { formation, members: loadedMembers } = await res.json();
-
-        // 指示書のロード
-        const savedInstructions = localStorage.getItem(`drillflow_set_instructions_${id}`);
-        if (savedInstructions) {
-          setSetInstructions(JSON.parse(savedInstructions));
-        } else {
-          setSetInstructions({});
-        }
-
-        // 変数のロード (セットごとのマップ)
-        const savedVars = localStorage.getItem(`drillflow_member_variables_${id}`);
-        if (savedVars) {
-          try {
-            const parsed = JSON.parse(savedVars);
-            const keys = Object.keys(parsed);
-            if (keys.length > 0 && typeof parsed[Number(keys[0])] === "number") {
-              const converted: Record<number, Record<number, number>> = {};
-              (formation.sets || []).forEach((s: Set) => {
-                converted[s.id] = { ...parsed };
-              });
-              setMemberVariables(converted);
-            } else {
-              setMemberVariables(parsed);
-            }
-          } catch (e) {
-            setMemberVariables({});
-          }
-        } else {
-          setMemberVariables({});
-        }
-
-        // ラベル・番号のロード
-        const savedLabels = localStorage.getItem(`drillflow_member_labels_${id}`);
-        if (savedLabels) {
-          setMemberCustomLabels(JSON.parse(savedLabels));
-        } else {
-          setMemberCustomLabels({});
-        }
-
-        // 変数グループのロード
-        const savedGroups = localStorage.getItem(`drillflow_member_groups_${id}`);
-        if (savedGroups) {
-          setMemberGroups(JSON.parse(savedGroups));
-        } else {
-          setMemberGroups(formation.memberGroups || []);
-        }
-
-        // フォーメーションスタイルのロード
-        const styleKey = `drillflow_formation_style_${id}`;
-        const savedStyle = localStorage.getItem(styleKey);
-        const style = savedStyle ? JSON.parse(savedStyle) : null;
-
-        if (style) {
-          let fw = style.fieldWidth ?? formation.fieldWidth ?? 150;
-          let fh = style.fieldHeight ?? formation.fieldHeight ?? 150;
-          let bx = style.blocksX ?? formation.blocksX ?? 15;
-          let by = style.blocksY ?? formation.blocksY ?? 15;
-          let sx = style.subdivisionsX ?? formation.subdivisionsX ?? 10;
-          let sy = style.subdivisionsY ?? formation.subdivisionsY ?? 10;
-
-          if ((fw === 128 && fh === 64) || (bx === 16 && by === 8)) {
-            fw = 150;
-            fh = 150;
-            bx = 15;
-            by = 15;
-            sx = 10;
-            sy = 10;
-            style.backgroundColor = "#ffffff";
-            style.gridLineColor = "rgba(0,0,0,0.15)";
-            style.markerColor = "#000000";
-            style.showYardLines = false;
-          }
-
-          formation.fieldWidth = fw;
-          formation.fieldHeight = fh;
-          formation.markingShape = style.markingShape ?? formation.markingShape ?? "cross";
-          formation.backgroundColor = style.backgroundColor ?? formation.backgroundColor ?? "#ffffff";
-          formation.gridLineColor = style.gridLineColor ?? formation.gridLineColor ?? "rgba(0,0,0,0.15)";
-          formation.gridLineWidth = style.gridLineWidth ?? formation.gridLineWidth ?? 1;
-          formation.gridLineStyle = style.gridLineStyle ?? formation.gridLineStyle ?? "solid";
-          formation.subGridLineStyle = style.subGridLineStyle ?? formation.subGridLineStyle ?? "dashed";
-          formation.showYardLines = style.showYardLines !== undefined ? style.showYardLines : false;
-          formation.showYardNumbers = style.showYardNumbers !== undefined ? style.showYardNumbers : true;
-          formation.showGridLines = style.showGridLines !== undefined ? style.showGridLines : true;
-          formation.customMarkers = (style.customMarkers && style.customMarkers.length > 0) ? style.customMarkers : (formation.customMarkers || []);
-          formation.blocksX = bx;
-          formation.blocksY = by;
-          formation.subdivisionsX = sx;
-          formation.subdivisionsY = sy;
-          formation.markerColor = style.markerColor ?? formation.markerColor ?? "#000000";
-          formation.markerSize = style.markerSize ?? formation.markerSize ?? 24;
-        } else {
-          let fw = formation.fieldWidth ?? 150;
-          let fh = formation.fieldHeight ?? 150;
-          let bx = formation.blocksX ?? 15;
-          let by = formation.blocksY ?? 15;
-          let sx = formation.subdivisionsX ?? 10;
-          let sy = formation.subdivisionsY ?? 10;
-
-          if ((fw === 128 && fh === 64) || (bx === 16 && by === 8)) {
-            fw = 150;
-            fh = 150;
-            bx = 15;
-            by = 15;
-            sx = 10;
-            sy = 10;
-          }
-
-          formation.fieldWidth = fw;
-          formation.fieldHeight = fh;
-          formation.markingShape = formation.markingShape ?? "cross";
-          formation.backgroundColor = formation.backgroundColor ?? "#ffffff";
-          formation.gridLineColor = formation.gridLineColor ?? "rgba(0,0,0,0.15)";
-          formation.gridLineWidth = formation.gridLineWidth ?? 1;
-          formation.gridLineStyle = formation.gridLineStyle ?? "solid";
-          formation.subGridLineStyle = formation.subGridLineStyle ?? "dashed";
-          formation.showYardLines = formation.showYardLines ?? false;
-          formation.showYardNumbers = formation.showYardNumbers ?? true;
-          formation.showGridLines = formation.showGridLines ?? true;
-          formation.blocksX = bx;
-          formation.blocksY = by;
-          formation.subdivisionsX = sx;
-          formation.subdivisionsY = sy;
-          formation.markerColor = formation.markerColor ?? "#000000";
-          formation.markerSize = formation.markerSize ?? 24;
-        }
-
-        // --- Set 0 (初期隊形) の自動補完＆セットソート & カウント強制0 ---
-        let loadedSets: Set[] = formation.sets ? [...formation.sets] : [];
-        const hasSet0 = loadedSets.some((s) => s.number === 0);
-        if (!hasSet0) {
-          const firstSet = loadedSets[0];
-          const set0Positions = firstSet
-            ? firstSet.positions.map((p) => ({ ...p, id: undefined, setId: -999 }))
-            : loadedMembers.map((m) => ({ memberId: m.id, setId: -999, x: 0.5, y: 0.5 }));
-          
-          const set0: Set = {
-            id: -999,
-            formationId: id,
-            number: 0,
-            counts: 0,
-            positions: set0Positions,
-          };
-          loadedSets = [set0, ...loadedSets];
-        }
-
-        // Set 0 のカウントは必ず 0
-        loadedSets = loadedSets.map((s) => (s.number === 0 ? { ...s, counts: 0 } : s));
-
-        loadedSets.sort((a, b) => a.number - b.number);
-        formation.sets = loadedSets;
-
-        setActiveFormation(formation);
-        setMembers(loadedMembers);
-        setIsDirty(false);
-        setSaveStatus("");
-
-        // 楽曲URLを設定
-        if (formation.music) {
-          setAudioUrl(formation.music);
-        } else {
-          setAudioUrl("");
-        }
-        setLocalAudioFile(null);
-
-        // セットを選択状態にする (Set 0 があれば Set 0、無ければ最初)
-        if (formation.sets && formation.sets.length > 0) {
-          setSelectedSetId(formation.sets[0].id);
-        } else {
-          setSelectedSetId(null);
-        }
-        
-        // エディタビューに移行
-        setActiveView("editor");
+        const data = await res.json();
+        formation = data.formation;
+        loadedMembers = data.members || [];
       }
     } catch (error) {
-      console.error(`Failed to load formation ${id}:`, error);
+      console.error(`Failed to load formation ${id} via API:`, error);
     }
+
+    // Vercel等でAPIレスポンスがない場合のローカルフォールバック
+    if (!formation) {
+      const savedLocalForm = localStorage.getItem(`drillflow_formation_${id}`);
+      if (savedLocalForm) {
+        try {
+          formation = JSON.parse(savedLocalForm);
+        } catch (e) {}
+      }
+      if (!formation) {
+        const localList = localStorage.getItem("drillflow_local_formations");
+        if (localList) {
+          try {
+            const list = JSON.parse(localList);
+            formation = list.find((f: any) => f.id === id);
+          } catch (e) {}
+        }
+      }
+      if (members.length > 0) {
+        loadedMembers = members;
+      } else {
+        const savedM = localStorage.getItem("drillflow_local_members");
+        if (savedM) {
+          try { loadedMembers = JSON.parse(savedM); } catch (e) {}
+        }
+      }
+    }
+
+    if (!formation) return;
+
+    // 指示書のロード
+    const savedInstructions = localStorage.getItem(`drillflow_set_instructions_${id}`);
+    if (savedInstructions) {
+      setSetInstructions(JSON.parse(savedInstructions));
+    } else {
+      setSetInstructions({});
+    }
+
+    // 変数のロード (セットごとのマップ)
+    const savedVars = localStorage.getItem(`drillflow_member_variables_${id}`);
+    if (savedVars) {
+      try {
+        const parsed = JSON.parse(savedVars);
+        const keys = Object.keys(parsed);
+        if (keys.length > 0 && typeof parsed[Number(keys[0])] === "number") {
+          const converted: Record<number, Record<number, number>> = {};
+          (formation.sets || []).forEach((s: Set) => {
+            converted[s.id] = { ...parsed };
+          });
+          setMemberVariables(converted);
+        } else {
+          setMemberVariables(parsed);
+        }
+      } catch (e) {
+        setMemberVariables({});
+      }
+    } else {
+      setMemberVariables({});
+    }
+
+    // ラベル・番号のロード
+    const savedLabels = localStorage.getItem(`drillflow_member_labels_${id}`);
+    if (savedLabels) {
+      setMemberCustomLabels(JSON.parse(savedLabels));
+    } else {
+      setMemberCustomLabels({});
+    }
+
+    // 変数グループのロード
+    const savedGroups = localStorage.getItem(`drillflow_member_groups_${id}`);
+    if (savedGroups) {
+      setMemberGroups(JSON.parse(savedGroups));
+    } else {
+      setMemberGroups(formation.memberGroups || []);
+    }
+
+    // フォーメーションスタイルのロード
+    const styleKey = `drillflow_formation_style_${id}`;
+    const savedStyle = localStorage.getItem(styleKey);
+    const style = savedStyle ? JSON.parse(savedStyle) : null;
+
+    if (style) {
+      let fw = style.fieldWidth ?? formation.fieldWidth ?? 150;
+      let fh = style.fieldHeight ?? formation.fieldHeight ?? 150;
+      let bx = style.blocksX ?? formation.blocksX ?? 15;
+      let by = style.blocksY ?? formation.blocksY ?? 15;
+      let sx = style.subdivisionsX ?? formation.subdivisionsX ?? 10;
+      let sy = style.subdivisionsY ?? formation.subdivisionsY ?? 10;
+
+      if ((fw === 128 && fh === 64) || (bx === 16 && by === 8)) {
+        fw = 150;
+        fh = 150;
+        bx = 15;
+        by = 15;
+        sx = 10;
+        sy = 10;
+        style.backgroundColor = "#ffffff";
+        style.gridLineColor = "rgba(0,0,0,0.15)";
+        style.markerColor = "#000000";
+        style.showYardLines = false;
+      }
+
+      formation.fieldWidth = fw;
+      formation.fieldHeight = fh;
+      formation.markingShape = style.markingShape ?? formation.markingShape ?? "cross";
+      formation.backgroundColor = style.backgroundColor ?? formation.backgroundColor ?? "#ffffff";
+      formation.gridLineColor = style.gridLineColor ?? formation.gridLineColor ?? "rgba(0,0,0,0.15)";
+      formation.gridLineWidth = style.gridLineWidth ?? formation.gridLineWidth ?? 1;
+      formation.gridLineStyle = style.gridLineStyle ?? formation.gridLineStyle ?? "solid";
+      formation.subGridLineStyle = style.subGridLineStyle ?? formation.subGridLineStyle ?? "dashed";
+      formation.showYardLines = style.showYardLines !== undefined ? style.showYardLines : false;
+      formation.showYardNumbers = style.showYardNumbers !== undefined ? style.showYardNumbers : true;
+      formation.showGridLines = style.showGridLines !== undefined ? style.showGridLines : true;
+      formation.customMarkers = (style.customMarkers && style.customMarkers.length > 0) ? style.customMarkers : (formation.customMarkers || []);
+      formation.blocksX = bx;
+      formation.blocksY = by;
+      formation.subdivisionsX = sx;
+      formation.subdivisionsY = sy;
+      formation.markerColor = style.markerColor ?? formation.markerColor ?? "#000000";
+      formation.markerSize = style.markerSize ?? formation.markerSize ?? 24;
+    } else {
+      let fw = formation.fieldWidth ?? 150;
+      let fh = formation.fieldHeight ?? 150;
+      let bx = formation.blocksX ?? 15;
+      let by = formation.blocksY ?? 15;
+      let sx = formation.subdivisionsX ?? 10;
+      let sy = formation.subdivisionsY ?? 10;
+
+      if ((fw === 128 && fh === 64) || (bx === 16 && by === 8)) {
+        fw = 150;
+        fh = 150;
+        bx = 15;
+        by = 15;
+        sx = 10;
+        sy = 10;
+      }
+
+      formation.fieldWidth = fw;
+      formation.fieldHeight = fh;
+      formation.markingShape = formation.markingShape ?? "cross";
+      formation.backgroundColor = formation.backgroundColor ?? "#ffffff";
+      formation.gridLineColor = formation.gridLineColor ?? "rgba(0,0,0,0.15)";
+      formation.gridLineWidth = formation.gridLineWidth ?? 1;
+      formation.gridLineStyle = formation.gridLineStyle ?? "solid";
+      formation.subGridLineStyle = formation.subGridLineStyle ?? "dashed";
+      formation.showYardLines = formation.showYardLines ?? false;
+      formation.showYardNumbers = formation.showYardNumbers ?? true;
+      formation.showGridLines = formation.showGridLines ?? true;
+      formation.blocksX = bx;
+      formation.blocksY = by;
+      formation.subdivisionsX = sx;
+      formation.subdivisionsY = sy;
+      formation.markerColor = formation.markerColor ?? "#000000";
+      formation.markerSize = formation.markerSize ?? 24;
+    }
+
+    // --- Set 0 (初期隊形) の自動補完＆セットソート & カウント強制0 ---
+    let loadedSets: Set[] = formation.sets ? [...formation.sets] : [];
+    const hasSet0 = loadedSets.some((s) => s.number === 0);
+    if (!hasSet0) {
+      const firstSet = loadedSets[0];
+      const set0Positions = firstSet
+        ? firstSet.positions.map((p) => ({ ...p, id: undefined, setId: -999 }))
+        : loadedMembers.map((m) => ({ memberId: m.id, setId: -999, x: 0.5, y: 0.5 }));
+      
+      const set0: Set = {
+        id: -999,
+        formationId: id,
+        number: 0,
+        counts: 0,
+        positions: set0Positions,
+      };
+      loadedSets = [set0, ...loadedSets];
+    }
+
+    // Set 0 のカウントは必ず 0
+    loadedSets = loadedSets.map((s) => (s.number === 0 ? { ...s, counts: 0 } : s));
+
+    loadedSets.sort((a, b) => a.number - b.number);
+    formation.sets = loadedSets;
+
+    setActiveFormation(formation);
+    setMembers(loadedMembers);
+    setIsDirty(false);
+    setSaveStatus("");
+
+    // 楽曲URLを設定
+    if (formation.music) {
+      setAudioUrl(formation.music);
+    } else {
+      setAudioUrl("");
+    }
+    setLocalAudioFile(null);
+
+    // セットを選択状態にする (Set 0 があれば Set 0、無ければ最初)
+    if (formation.sets && formation.sets.length > 0) {
+      setSelectedSetId(formation.sets[0].id);
+    } else {
+      setSelectedSetId(null);
+    }
+    
+    // エディタビューに移行
+    setActiveView("editor");
   };
 
   // 整列対象メンバーの順序入れ替え
@@ -802,31 +850,31 @@ export default function App() {
     e.preventDefault();
     if (!newFormationTitle) return;
 
+    let newForm: any = null;
+    const chosenTemplate = fieldTemplates.find(t => t.id === newFormationTemplateId) || DEFAULT_TEMPLATES[0];
+
+    const templateStyle = {
+      fieldWidth: chosenTemplate.fieldWidth,
+      fieldHeight: chosenTemplate.fieldHeight,
+      markingShape: chosenTemplate.markingShape,
+      backgroundColor: chosenTemplate.backgroundColor,
+      gridLineColor: chosenTemplate.gridLineColor,
+      gridLineWidth: chosenTemplate.gridLineWidth,
+      gridLineStyle: chosenTemplate.gridLineStyle,
+      subGridLineStyle: chosenTemplate.subGridLineStyle || "dashed",
+      showYardLines: chosenTemplate.showYardLines,
+      showYardNumbers: chosenTemplate.showYardNumbers,
+      showGridLines: chosenTemplate.showGridLines,
+      customMarkers: chosenTemplate.customMarkers,
+      blocksX: chosenTemplate.blocksX ?? 15,
+      blocksY: chosenTemplate.blocksY ?? 15,
+      subdivisionsX: chosenTemplate.subdivisionsX ?? 10,
+      subdivisionsY: chosenTemplate.subdivisionsY ?? 10,
+      markerColor: chosenTemplate.markerColor ?? "#000000",
+      markerSize: chosenTemplate.markerSize ?? 24,
+    };
+
     try {
-      // テンプレート情報の取得
-      const chosenTemplate = fieldTemplates.find(t => t.id === newFormationTemplateId) || DEFAULT_TEMPLATES[0];
-
-      const templateStyle = {
-        fieldWidth: chosenTemplate.fieldWidth,
-        fieldHeight: chosenTemplate.fieldHeight,
-        markingShape: chosenTemplate.markingShape,
-        backgroundColor: chosenTemplate.backgroundColor,
-        gridLineColor: chosenTemplate.gridLineColor,
-        gridLineWidth: chosenTemplate.gridLineWidth,
-        gridLineStyle: chosenTemplate.gridLineStyle,
-        subGridLineStyle: chosenTemplate.subGridLineStyle || "dashed",
-        showYardLines: chosenTemplate.showYardLines,
-        showYardNumbers: chosenTemplate.showYardNumbers,
-        showGridLines: chosenTemplate.showGridLines,
-        customMarkers: chosenTemplate.customMarkers,
-        blocksX: chosenTemplate.blocksX ?? 15,
-        blocksY: chosenTemplate.blocksY ?? 15,
-        subdivisionsX: chosenTemplate.subdivisionsX ?? 10,
-        subdivisionsY: chosenTemplate.subdivisionsY ?? 10,
-        markerColor: chosenTemplate.markerColor ?? "#000000",
-        markerSize: chosenTemplate.markerSize ?? 24,
-      };
-
       const res = await fetch("/api/formations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -839,24 +887,51 @@ export default function App() {
       });
 
       if (res.ok) {
-        const newForm = await res.json();
-
-        // テンプレートスタイルのコピーをローカルストレージへ保存
-        const styleKey = `drillflow_formation_style_${newForm.id}`;
-        localStorage.setItem(styleKey, JSON.stringify(templateStyle));
-
-        setNewFormationTitle("");
-        setNewFormationMusic("");
-        setNewFormationBpm(120);
-        setShowNewFormationModal(false);
-
-        // リスト更新して新規作成したフォーメーションを読み込む
-        await fetchFormations();
-        loadFormation(newForm.id);
+        newForm = await res.json();
       }
     } catch (error) {
-      console.error("Failed to create formation:", error);
+      console.error("Failed to create formation via API:", error);
     }
+
+    // Vercel等でAPIレスポンスがない場合のローカルフォールバック
+    if (!newForm) {
+      const newId = Date.now();
+      const initialSet: Set = {
+        id: -999,
+        formationId: newId,
+        number: 0,
+        counts: 0,
+        positions: members.map((m) => ({ memberId: m.id, setId: -999, x: 0.5, y: 0.5 })),
+      };
+
+      newForm = {
+        id: newId,
+        title: newFormationTitle,
+        music: newFormationMusic,
+        bpm: newFormationBpm,
+        ...templateStyle,
+        sets: [initialSet],
+      };
+
+      // ローカル一覧を更新
+      const localListRaw = localStorage.getItem("drillflow_local_formations");
+      let localList = localListRaw ? JSON.parse(localListRaw) : [...formations];
+      localList = [newForm, ...localList.filter((f: any) => f.id !== newId)];
+      localStorage.setItem("drillflow_local_formations", JSON.stringify(localList));
+      localStorage.setItem(`drillflow_formation_${newId}`, JSON.stringify(newForm));
+      setFormations(localList);
+    }
+
+    // テンプレートスタイルのコピーをローカルストレージへ保存
+    const styleKey = `drillflow_formation_style_${newForm.id}`;
+    localStorage.setItem(styleKey, JSON.stringify(templateStyle));
+
+    setNewFormationTitle("");
+    setNewFormationMusic("");
+    setNewFormationBpm(120);
+    setShowNewFormationModal(false);
+
+    loadFormation(newForm.id);
   };
 
   // API: フォーメーション一括保存
@@ -865,8 +940,8 @@ export default function App() {
     setSaveStatus("保存中...");
 
     try {
-      // 立ち位置等のDB保存
-      const res = await fetch(`/api/formations/${activeFormation.id}/save`, {
+      // 立ち位置等のDB保存を試行
+      await fetch(`/api/formations/${activeFormation.id}/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -891,61 +966,67 @@ export default function App() {
           memberGroups: memberGroups,
         }),
       });
-
-      if (res.ok) {
-        // ローカルストレージ関連も同時に確定保存
-        localStorage.setItem(
-          `drillflow_set_instructions_${activeFormation.id}`,
-          JSON.stringify(setInstructions)
-        );
-        localStorage.setItem(
-          `drillflow_member_variables_${activeFormation.id}`,
-          JSON.stringify(memberVariables)
-        );
-        localStorage.setItem(
-          `drillflow_member_labels_${activeFormation.id}`,
-          JSON.stringify(memberCustomLabels)
-        );
-        localStorage.setItem(
-          `drillflow_member_groups_${activeFormation.id}`,
-          JSON.stringify(memberGroups)
-        );
-
-        const styleKey = `drillflow_formation_style_${activeFormation.id}`;
-        const templateStyle = {
-          fieldWidth: activeFormation.fieldWidth || 150,
-          fieldHeight: activeFormation.fieldHeight || 150,
-          markingShape: activeFormation.markingShape || "cross",
-          backgroundColor: activeFormation.backgroundColor || "#ffffff",
-          gridLineColor: activeFormation.gridLineColor || "rgba(0,0,0,0.15)",
-          gridLineWidth: activeFormation.gridLineWidth || 1,
-          gridLineStyle: activeFormation.gridLineStyle || "solid",
-          subGridLineStyle: activeFormation.subGridLineStyle || "dashed",
-          showYardLines: activeFormation.showYardLines !== false,
-          showYardNumbers: activeFormation.showYardNumbers !== false,
-          showGridLines: activeFormation.showGridLines !== false,
-          customMarkers: activeFormation.customMarkers || [],
-          blocksX: activeFormation.blocksX ?? 15,
-          blocksY: activeFormation.blocksY ?? 15,
-          subdivisionsX: activeFormation.subdivisionsX ?? 10,
-          subdivisionsY: activeFormation.subdivisionsY ?? 10,
-          markerColor: activeFormation.markerColor ?? "#000000",
-          markerSize: activeFormation.markerSize ?? 24,
-        };
-        localStorage.setItem(styleKey, JSON.stringify(templateStyle));
-
-        setIsDirty(false);
-        setSaveStatus("保存されました");
-        setTimeout(() => setSaveStatus(""), 3000);
-        // 一覧を再取得
-        fetchFormations();
-      } else {
-        setSaveStatus("保存に失敗しました");
-      }
     } catch (error) {
-      console.error("Failed to save formation:", error);
-      setSaveStatus("通信エラーが発生しました");
+      console.error("Failed to save formation to backend API:", error);
     }
+
+    // サーバーの成否にかかわらず常にローカルストレージに確定保存
+    localStorage.setItem(
+      `drillflow_set_instructions_${activeFormation.id}`,
+      JSON.stringify(setInstructions)
+    );
+    localStorage.setItem(
+      `drillflow_member_variables_${activeFormation.id}`,
+      JSON.stringify(memberVariables)
+    );
+    localStorage.setItem(
+      `drillflow_member_labels_${activeFormation.id}`,
+      JSON.stringify(memberCustomLabels)
+    );
+    localStorage.setItem(
+      `drillflow_member_groups_${activeFormation.id}`,
+      JSON.stringify(memberGroups)
+    );
+
+    const styleKey = `drillflow_formation_style_${activeFormation.id}`;
+    const templateStyle = {
+      fieldWidth: activeFormation.fieldWidth || 150,
+      fieldHeight: activeFormation.fieldHeight || 150,
+      markingShape: activeFormation.markingShape || "cross",
+      backgroundColor: activeFormation.backgroundColor || "#ffffff",
+      gridLineColor: activeFormation.gridLineColor || "rgba(0,0,0,0.15)",
+      gridLineWidth: activeFormation.gridLineWidth || 1,
+      gridLineStyle: activeFormation.gridLineStyle || "solid",
+      subGridLineStyle: activeFormation.subGridLineStyle || "dashed",
+      showYardLines: activeFormation.showYardLines !== false,
+      showYardNumbers: activeFormation.showYardNumbers !== false,
+      showGridLines: activeFormation.showGridLines !== false,
+      customMarkers: activeFormation.customMarkers || [],
+      blocksX: activeFormation.blocksX ?? 15,
+      blocksY: activeFormation.blocksY ?? 15,
+      subdivisionsX: activeFormation.subdivisionsX ?? 10,
+      subdivisionsY: activeFormation.subdivisionsY ?? 10,
+      markerColor: activeFormation.markerColor ?? "#000000",
+      markerSize: activeFormation.markerSize ?? 24,
+    };
+    localStorage.setItem(styleKey, JSON.stringify(templateStyle));
+    localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(activeFormation));
+
+    // ローカル一覧も更新
+    const localListRaw = localStorage.getItem("drillflow_local_formations");
+    let localList = localListRaw ? JSON.parse(localListRaw) : [...formations];
+    const existingIdx = localList.findIndex((f: any) => f.id === activeFormation.id);
+    if (existingIdx !== -1) {
+      localList[existingIdx] = activeFormation;
+    } else {
+      localList.unshift(activeFormation);
+    }
+    localStorage.setItem("drillflow_local_formations", JSON.stringify(localList));
+    setFormations(localList);
+
+    setIsDirty(false);
+    setSaveStatus("保存されました");
+    setTimeout(() => setSaveStatus(""), 3000);
   };
 
   // セット指示の新規登録
@@ -1255,29 +1336,50 @@ export default function App() {
   const handleCreateSet = async () => {
     if (!activeFormation) return;
 
+    let newSet: Set | null = null;
     try {
       const res = await fetch("/api/sets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           formationId: activeFormation.id,
-          counts: 8, // デフォルト16カウント
+          counts: 8, // デフォルト8カウント
         }),
       });
 
       if (res.ok) {
-        const newSet = await res.json();
-        // activeFormation を更新
-        const updatedSets = [...activeFormation.sets, newSet].sort(
-          (a, b) => a.number - b.number
-        );
-        setActiveFormation({ ...activeFormation, sets: updatedSets });
-        setSelectedSetId(newSet.id);
-        setIsDirty(true);
+        newSet = await res.json();
       }
     } catch (error) {
-      console.error("Failed to add set:", error);
+      console.error("Failed to add set via API:", error);
     }
+
+    if (!newSet) {
+      const currentSets = activeFormation.sets || [];
+      const maxSetNum = currentSets.reduce((max, s) => Math.max(max, s.number), 0);
+      const lastSet = currentSets.find((s) => s.number === maxSetNum) || currentSets[currentSets.length - 1];
+      const nextNumber = maxSetNum + 1;
+      const prevPositions = lastSet
+        ? lastSet.positions
+        : members.map((m) => ({ memberId: m.id, setId: Date.now(), x: 0.5, y: 0.5 }));
+
+      newSet = {
+        id: Date.now(),
+        formationId: activeFormation.id,
+        number: nextNumber,
+        counts: 8,
+        positions: prevPositions.map((p) => ({ ...p, id: undefined, setId: Date.now() })),
+      };
+    }
+
+    const updatedSets = [...activeFormation.sets.filter((s) => s.id !== newSet!.id), newSet].sort(
+      (a, b) => a.number - b.number
+    );
+    const updatedFormation = { ...activeFormation, sets: updatedSets };
+    setActiveFormation(updatedFormation);
+    setSelectedSetId(newSet.id);
+    setIsDirty(true);
+    localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
   };
 
   // API: セットカウント数変更 (Update counts)
@@ -1289,22 +1391,22 @@ export default function App() {
       return;
     }
 
+    const updatedSets = activeFormation.sets.map((set) =>
+      set.id === setId ? { ...set, counts: set.number === 0 ? 0 : counts } : set
+    );
+    const updatedFormation = { ...activeFormation, sets: updatedSets };
+    setActiveFormation(updatedFormation);
+    setIsDirty(true);
+    localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
+
     try {
-      const res = await fetch(`/api/sets/${setId}`, {
+      await fetch(`/api/sets/${setId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ counts }),
       });
-
-      if (res.ok) {
-        const updatedSets = activeFormation.sets.map((set) =>
-          set.id === setId ? { ...set, counts: set.number === 0 ? 0 : counts } : set
-        );
-        setActiveFormation({ ...activeFormation, sets: updatedSets });
-        setIsDirty(true);
-      }
     } catch (error) {
-      console.error("Failed to update set counts:", error);
+      console.error("Failed to update set counts via API:", error);
     }
   };
 
@@ -1312,22 +1414,44 @@ export default function App() {
   const handleDuplicateSet = async (setId: number) => {
     if (!activeFormation) return;
 
+    let newSet: Set | null = null;
     try {
       const res = await fetch(`/api/sets/${setId}/duplicate`, {
         method: "POST",
       });
 
       if (res.ok) {
-        const newSet = await res.json();
-        const updatedSets = [...activeFormation.sets, newSet].sort(
-          (a, b) => a.number - b.number
-        );
-        setActiveFormation({ ...activeFormation, sets: updatedSets });
-        setSelectedSetId(newSet.id);
-        setIsDirty(true);
+        newSet = await res.json();
       }
     } catch (error) {
-      console.error("Failed to duplicate set:", error);
+      console.error("Failed to duplicate set via API:", error);
+    }
+
+    if (!newSet) {
+      const targetSet = activeFormation.sets.find((s) => s.id === setId);
+      if (targetSet) {
+        const currentSets = activeFormation.sets || [];
+        const maxSetNum = currentSets.reduce((max, s) => Math.max(max, s.number), 0);
+        const nextNumber = maxSetNum + 1;
+        newSet = {
+          id: Date.now(),
+          formationId: activeFormation.id,
+          number: nextNumber,
+          counts: targetSet.counts || 8,
+          positions: (targetSet.positions || []).map((p) => ({ ...p, id: undefined, setId: Date.now() })),
+        };
+      }
+    }
+
+    if (newSet) {
+      const updatedSets = [...activeFormation.sets.filter((s) => s.id !== newSet!.id), newSet].sort(
+        (a, b) => a.number - b.number
+      );
+      const updatedFormation = { ...activeFormation, sets: updatedSets };
+      setActiveFormation(updatedFormation);
+      setSelectedSetId(newSet.id);
+      setIsDirty(true);
+      localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
     }
   };
 
@@ -1341,43 +1465,31 @@ export default function App() {
 
     if (!window.confirm("このNo.を削除しますか？")) return;
 
+    const setIndex = activeFormation.sets.findIndex((s) => s.id === setId);
+    const remainingSets = activeFormation.sets.filter((s) => s.id !== setId);
+    const renumberedSets = remainingSets.map((s, idx) => ({
+      ...s,
+      number: idx,
+    }));
+
+    const updatedFormation = { ...activeFormation, sets: renumberedSets };
+    setActiveFormation(updatedFormation);
+
+    if (selectedSetId === setId) {
+      const newSelectedId = renumberedSets[Math.max(0, setIndex - 1)]?.id || renumberedSets[0]?.id || null;
+      setSelectedSetId(newSelectedId);
+    }
+
+    setIsDirty(true);
+    setSaveStatus("削除しました");
+    localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
+
     try {
-      // 1. Optimistic local state update (0始まりの連続ナンバーに振り直し)
-      const setIndex = activeFormation.sets.findIndex((s) => s.id === setId);
-      const remainingSets = activeFormation.sets.filter((s) => s.id !== setId);
-      const renumberedSets = remainingSets.map((s, idx) => ({
-        ...s,
-        number: idx,
-      }));
-
-      setActiveFormation({
-        ...activeFormation,
-        sets: renumberedSets,
-      });
-
-      if (selectedSetId === setId) {
-        const newSelectedId = renumberedSets[Math.max(0, setIndex - 1)]?.id || renumberedSets[0]?.id || null;
-        setSelectedSetId(newSelectedId);
-      }
-
-      setIsDirty(true);
-
-      // 2. Server API call
-      const res = await fetch(`/api/sets/${setId}`, {
+      await fetch(`/api/sets/${setId}`, {
         method: "DELETE",
       });
-
-      if (res.ok) {
-        // サーバーから最新のセット一覧を取得して同期
-        const setsRes = await fetch(`/api/sets?formationId=${activeFormation.id}`);
-        if (setsRes.ok) {
-          const freshSets = await setsRes.json();
-          setActiveFormation((prev) => (prev ? { ...prev, sets: freshSets } : prev));
-        }
-        setSaveStatus("削除しました");
-      }
     } catch (error) {
-      console.error("Failed to delete set:", error);
+      console.error("Failed to delete set via API:", error);
     }
   };
 
@@ -1386,6 +1498,7 @@ export default function App() {
     e.preventDefault();
     if (!newMemberName) return;
 
+    let createdMember: Member | null = null;
     try {
       const res = await fetch("/api/members", {
         method: "POST",
@@ -1394,23 +1507,50 @@ export default function App() {
           name: newMemberName,
           instrument: newMemberInstrument,
           color: newMemberColor,
-          formationId: activeFormation ? activeFormation.id : undefined, // これを渡すと全セットに初期座標でポジションを作ってくれる
+          formationId: activeFormation ? activeFormation.id : undefined,
         }),
       });
 
       if (res.ok) {
-        setNewMemberName("");
-        setShowNewMemberModal(false);
-        // フォーメーションとメンバーリストをリロードして不整合を防ぐ
-        if (activeFormation) {
-          loadFormation(activeFormation.id);
-        } else {
-          fetchMembers();
-        }
+        createdMember = await res.json();
       }
     } catch (error) {
-      console.error("Failed to create member:", error);
+      console.error("Failed to create member via API:", error);
     }
+
+    if (!createdMember) {
+      createdMember = {
+        id: Date.now(),
+        name: newMemberName,
+        instrument: newMemberInstrument,
+        color: newMemberColor,
+      };
+      const updatedMembers = [...members, createdMember];
+      setMembers(updatedMembers);
+      localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
+
+      if (activeFormation) {
+        const updatedSets = activeFormation.sets.map((s) => ({
+          ...s,
+          positions: [
+            ...s.positions,
+            { memberId: createdMember!.id, setId: s.id, x: 0.5, y: 0.5 },
+          ],
+        }));
+        const updatedFormation = { ...activeFormation, sets: updatedSets };
+        setActiveFormation(updatedFormation);
+        localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
+      }
+    } else {
+      if (activeFormation) {
+        loadFormation(activeFormation.id);
+      } else {
+        fetchMembers();
+      }
+    }
+
+    setNewMemberName("");
+    setShowNewMemberModal(false);
   };
 
   // API: 部員編集
@@ -1418,8 +1558,19 @@ export default function App() {
     e.preventDefault();
     if (!editingMember || !editMemberName) return;
 
+    const updatedMember = {
+      ...editingMember,
+      name: editMemberName,
+      instrument: editMemberInstrument,
+      color: editMemberColor,
+    };
+
+    const updatedMembers = members.map((m) => (m.id === editingMember.id ? updatedMember : m));
+    setMembers(updatedMembers);
+    localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
+
     try {
-      const res = await fetch(`/api/members/${editingMember.id}`, {
+      await fetch(`/api/members/${editingMember.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1428,41 +1579,41 @@ export default function App() {
           color: editMemberColor,
         }),
       });
-
-      if (res.ok) {
-        setEditingMember(null);
-        if (activeFormation) {
-          loadFormation(activeFormation.id);
-        } else {
-          fetchMembers();
-        }
-      }
     } catch (error) {
-      console.error("Failed to update member:", error);
+      console.error("Failed to update member via API:", error);
     }
+
+    setEditingMember(null);
   };
 
   // API: 部員削除
   const handleDeleteMember = async (memberId: number) => {
     if (!window.confirm("この部員を完全に削除しますか？（すべてのNo.の位置情報も削除されます）")) return;
 
+    const updatedMembers = members.filter((m) => m.id !== memberId);
+    setMembers(updatedMembers);
+    localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
+
+    if (selectedMemberId === memberId) {
+      setSelectedMemberId(null);
+    }
+
+    if (activeFormation) {
+      const updatedSets = activeFormation.sets.map((s) => ({
+        ...s,
+        positions: s.positions.filter((p) => p.memberId !== memberId),
+      }));
+      const updatedFormation = { ...activeFormation, sets: updatedSets };
+      setActiveFormation(updatedFormation);
+      localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
+    }
+
     try {
-      const res = await fetch(`/api/members/${memberId}`, {
+      await fetch(`/api/members/${memberId}`, {
         method: "DELETE",
       });
-
-      if (res.ok) {
-        if (selectedMemberId === memberId) {
-          setSelectedMemberId(null);
-        }
-        if (activeFormation) {
-          loadFormation(activeFormation.id);
-        } else {
-          fetchMembers();
-        }
-      }
     } catch (error) {
-      console.error("Failed to delete member:", error);
+      console.error("Failed to delete member via API:", error);
     }
   };
 

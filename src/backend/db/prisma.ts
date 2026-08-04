@@ -3,7 +3,22 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 
-if (!process.env.DATABASE_URL) {
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+if (isVercel) {
+  process.env.DATABASE_URL = "file:/tmp/dev.db";
+  try {
+    if (!fs.existsSync("/tmp/dev.db")) {
+      const sourceDb = path.join(process.cwd(), "prisma", "dev.db");
+      if (fs.existsSync(sourceDb)) {
+        fs.copyFileSync(sourceDb, "/tmp/dev.db");
+        console.log("✅ Copied initial dev.db to /tmp/dev.db for Vercel serverless environment");
+      }
+    }
+  } catch (err) {
+    console.error("⚠️ Failed to copy dev.db to /tmp:", err);
+  }
+} else if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = "file:./dev.db";
 }
 
@@ -14,10 +29,22 @@ let isResetting = false;
 export async function checkAndRecoverDatabase(): Promise<boolean> {
   if (isResetting) return true;
   try {
-    const dbPath = path.join(process.cwd(), "prisma", "dev.db");
+    const dbPath = isVercel
+      ? "/tmp/dev.db"
+      : path.join(process.cwd(), "prisma", "dev.db");
+
+    if (isVercel && !fs.existsSync(dbPath)) {
+      const sourceDb = path.join(process.cwd(), "prisma", "dev.db");
+      if (fs.existsSync(sourceDb)) {
+        fs.copyFileSync(sourceDb, "/tmp/dev.db");
+      }
+    }
+
     const isEmptyFile = !fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0;
     if (isEmptyFile) {
-      throw new Error("Database file is missing or 0 bytes (uninitialized). Triggering schema push.");
+      if (!isVercel) {
+        throw new Error("Database file is missing or 0 bytes (uninitialized). Triggering schema push.");
+      }
     }
 
     // Attempt a lightweight read query to check database integrity
@@ -42,7 +69,8 @@ export async function checkAndRecoverDatabase(): Promise<boolean> {
     console.warn("⚠️ Corrupted or uninitialized SQLite database detected:", errorStr);
     
     if (
-      error?.code === "P2021" ||
+      !isVercel &&
+      (error?.code === "P2021" ||
       error?.code === "P2022" ||
       errorStr.includes("malformed") ||
       errorStr.includes("disk image") ||
@@ -51,7 +79,7 @@ export async function checkAndRecoverDatabase(): Promise<boolean> {
       errorStr.includes("P2021") ||
       errorStr.includes("SqliteError") ||
       errorStr.includes("unable to open database file") ||
-      errorStr.includes("uninitialized")
+      errorStr.includes("uninitialized"))
     ) {
       isResetting = true;
       try {

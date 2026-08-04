@@ -1,36 +1,13 @@
 import "dotenv/config";
-import express from "express";
 import path from "path";
+import express from "express";
 import { createServer as createViteServer } from "vite";
 
+import { app } from "./src/backend/app";
 import { checkAndRecoverDatabase } from "./src/backend/db/prisma";
-import formationRoutes from "./src/backend/routes/formationRoutes";
-import memberRoutes from "./src/backend/routes/memberRoutes";
-import setRoutes from "./src/backend/routes/setRoutes";
-import positionRoutes from "./src/backend/routes/positionRoutes";
 
-const app = express();
 const PORT = 3000;
 
-app.use(express.json());
-
-// Ensure database is healthy and seeded before handling API requests
-app.use("/api", async (req, res, next) => {
-  try {
-    await checkAndRecoverDatabase();
-  } catch (err) {
-    console.error("DB check error:", err);
-  }
-  next();
-});
-
-// --- 3-Tier Backend API Routes ---
-app.use("/api/formations", formationRoutes);
-app.use("/api/members", memberRoutes);
-app.use("/api/sets", setRoutes);
-app.use("/api/positions", positionRoutes);
-
-// --- Vite Middleware or Static Files Hosting ---
 async function startServer() {
   await checkAndRecoverDatabase();
 
@@ -54,4 +31,5 @@ async function startServer() {
 }
 
 startServer();
+
 
