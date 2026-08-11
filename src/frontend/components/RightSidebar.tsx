@@ -16,7 +16,7 @@ import {
   X,
   AlertTriangle,
 } from "lucide-react";
-import { evaluateInstructionFormula, validateInstructionCounts } from "../lib/marchingUtils";
+import { evaluateInstructionFormula, validateInstructionCounts, getInstrumentPrefix, getEffectiveMemberLabel } from "../lib/marchingUtils";
 
 interface RightSidebarProps {
   members: Member[];
@@ -33,7 +33,7 @@ interface RightSidebarProps {
   } | null;
   currentYardDesc: string;
   setInstructions: { [setId: number]: SetInstruction[] };
-  onAddInstruction: (targetType: "all" | "instrument" | "individual", targetValue: string, text: string) => void;
+  onAddInstruction: (targetType: "all" | "instrument" | "group" | "individual", targetValue: string, text: string) => void;
   onDeleteInstruction: (id: string) => void;
   onUpdateInstructionText?: (id: string, newText: string) => void;
   memberVariables: { [memberId: number]: number };
@@ -41,6 +41,7 @@ interface RightSidebarProps {
   onAutoAssignVariablesFromX: () => void;
   onBatchSetVariables: (val: number) => void;
   onDeleteMember: (id: number) => void;
+  onDeleteAllMembers?: () => void;
   onEditMember?: (member: Member) => void;
   onShowNewMemberModal: () => void;
   isRightSidebarOpen: boolean;
@@ -53,6 +54,8 @@ interface RightSidebarProps {
   onTabChange?: (tab: "personnel" | "dotbook" | "instructions" | "variables" | "warnings") => void;
   allSetCollisions?: { setId: number; setNumber: number; count: number; pairs: { m1: Member; m2: Member; dist: number; isSevere: boolean; timeDesc?: string }[] }[];
   onSelectSet?: (setId: number) => void;
+  enableCollisionDetection?: boolean;
+  onToggleCollisionDetection?: () => void;
 }
 
 export default function RightSidebar({
@@ -72,6 +75,7 @@ export default function RightSidebar({
   onAutoAssignVariablesFromX,
   onBatchSetVariables,
   onDeleteMember,
+  onDeleteAllMembers,
   onEditMember,
   onShowNewMemberModal,
   isRightSidebarOpen,
@@ -84,6 +88,8 @@ export default function RightSidebar({
   onTabChange,
   allSetCollisions = [],
   onSelectSet,
+  enableCollisionDetection = true,
+  onToggleCollisionDetection,
 }: RightSidebarProps) {
   const [activeTab, setActiveTab] = useState<"personnel" | "dotbook" | "instructions" | "variables" | "warnings">(propActiveTab || "personnel");
 
@@ -98,13 +104,20 @@ export default function RightSidebar({
     if (onTabChange) onTabChange(tab);
   };
 
-  // Group creation state
+  // Group creation & editing state
   const [newGroupName, setNewGroupName] = useState<string>("");
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<number[]>([]);
   const [showGroupCreator, setShowGroupCreator] = useState<boolean>(false);
 
+  // グループのメンバー編集（追加・削除）用ステート
+  const [editingGroup, setEditingGroup] = useState<MemberGroup | null>(null);
+  const [editGroupName, setEditGroupName] = useState<string>("");
+  const [editGroupMemberIds, setEditGroupMemberIds] = useState<number[]>([]);
+  const [editGroupSearch, setEditGroupSearch] = useState<string>("");
+  const [editGroupInstFilter, setEditGroupInstFilter] = useState<string>("");
+
   // New instruction states
-  const [newInstTargetType, setNewInstTargetType] = useState<"all" | "instrument" | "individual">("all");
+  const [newInstTargetType, setNewInstTargetType] = useState<"all" | "instrument" | "group" | "individual">("all");
   const [newInstTargetValue, setNewInstTargetValue] = useState<string>("");
   const [newInstText, setNewInstText] = useState<string>("");
 
@@ -132,6 +145,10 @@ export default function RightSidebar({
       .filter((inst) => {
         if (inst.targetType === "all") return true;
         if (inst.targetType === "instrument" && inst.targetValue === member.instrument) return true;
+        if (inst.targetType === "group") {
+          const grp = memberGroups.find((g) => g.id === inst.targetValue || g.name === inst.targetValue);
+          if (grp && grp.memberIds.includes(member.id)) return true;
+        }
         if (inst.targetType === "individual" && inst.targetValue === String(member.id)) return true;
         return false;
       })
@@ -155,6 +172,8 @@ export default function RightSidebar({
     let targetVal = "全員";
     if (newInstTargetType === "instrument") {
       targetVal = newInstTargetValue || instruments[0] || "";
+    } else if (newInstTargetType === "group") {
+      targetVal = newInstTargetValue || (memberGroups[0] ? memberGroups[0].id : "");
     } else if (newInstTargetType === "individual") {
       targetVal = newInstTargetValue || (members[0] ? String(members[0].id) : "");
     }
@@ -169,12 +188,18 @@ export default function RightSidebar({
 
   const handleCreateGroup = () => {
     if (!newGroupName.trim() || selectedGroupMemberIds.length === 0 || !onUpdateMemberGroups) return;
+    const newMemberSet = new Set(selectedGroupMemberIds);
+    // 新しいグループに含まれる部員を古いグループから自動削除
+    const updatedExisting = memberGroups.map((g) => ({
+      ...g,
+      memberIds: g.memberIds.filter((id) => !newMemberSet.has(id)),
+    }));
     const newGroup: MemberGroup = {
       id: String(Date.now()),
       name: newGroupName.trim(),
       memberIds: selectedGroupMemberIds,
     };
-    onUpdateMemberGroups([...memberGroups, newGroup]);
+    onUpdateMemberGroups([...updatedExisting, newGroup]);
     setNewGroupName("");
     setSelectedGroupMemberIds([]);
     setShowGroupCreator(false);
@@ -183,6 +208,40 @@ export default function RightSidebar({
   const handleDeleteGroup = (groupId: string) => {
     if (!onUpdateMemberGroups) return;
     onUpdateMemberGroups(memberGroups.filter((g) => g.id !== groupId));
+  };
+
+  const handleOpenEditGroup = (group: MemberGroup) => {
+    setEditingGroup(group);
+    setEditGroupName(group.name);
+    setEditGroupMemberIds([...group.memberIds]);
+    setEditGroupSearch("");
+    setEditGroupInstFilter("");
+  };
+
+  const handleToggleMemberInEditGroup = (memberId: number) => {
+    setEditGroupMemberIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
+  const handleSaveGroupEdit = () => {
+    if (!editingGroup || !editGroupName.trim() || !onUpdateMemberGroups) return;
+    const editMemberSet = new Set(editGroupMemberIds);
+    // 今回更新されたグループに含まれる部員を、他のグループから自動的に削除
+    const updated = memberGroups.map((g) =>
+      g.id === editingGroup.id
+        ? {
+            ...g,
+            name: editGroupName.trim(),
+            memberIds: editGroupMemberIds,
+          }
+        : {
+            ...g,
+            memberIds: g.memberIds.filter((id) => !editMemberSet.has(id)),
+          }
+    );
+    onUpdateMemberGroups(updated);
+    setEditingGroup(null);
   };
 
   const handleAutoCreateGroupsByX = () => {
@@ -199,7 +258,12 @@ export default function RightSidebar({
       memberIds: ids,
       variableX: Number(xStr),
     }));
-    onUpdateMemberGroups([...memberGroups, ...newGroups]);
+    const autoMemberSet = new Set(newGroups.flatMap((g) => g.memberIds));
+    const updatedExisting = memberGroups.map((g) => ({
+      ...g,
+      memberIds: g.memberIds.filter((id) => !autoMemberSet.has(id)),
+    }));
+    onUpdateMemberGroups([...updatedExisting, ...newGroups]);
   };
 
   if (!isRightSidebarOpen) {
@@ -315,7 +379,8 @@ export default function RightSidebar({
               <div className="flex-1 overflow-y-auto p-2.5 space-y-1 bg-slate-50/50">
                 {members.map((m) => {
                   const isSelected = m.id === selectedMemberId;
-                  const mLabel = memberCustomLabels[m.id] || "";
+                  const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
+                  const displayName = m.name && m.name !== mLabel ? m.name : m.instrument;
                   return (
                     <div
                       key={m.id}
@@ -330,13 +395,13 @@ export default function RightSidebar({
                         className="w-2.5 h-2.5 rounded-full shrink-0"
                         style={{ backgroundColor: m.color }}
                       />
-                      <div className="flex-1 font-semibold truncate flex items-center gap-1">
-                        {mLabel && (
-                          <span className="bg-slate-100 text-slate-600 px-1 rounded font-mono text-[9px] font-bold">
-                            {mLabel}
-                          </span>
-                        )}
-                        <span>{m.name}</span>
+                      <div className="flex-1 font-semibold truncate flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-slate-900 text-xs shrink-0">
+                          {mLabel}
+                        </span>
+                        {m.name ? (
+                          <span className="truncate font-mono font-bold text-slate-900 text-xs">{m.name}</span>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
                         <button
@@ -391,32 +456,16 @@ export default function RightSidebar({
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {selectedMember ? (
                 <>
-                  {/* Selected Member Header with Custom Numbering Input */}
-                  <div className="flex justify-between items-start pb-2 border-b border-slate-800">
+                  {/* Selected Member Header */}
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                     <div className="flex items-center gap-2">
                       <div
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        className="w-3 h-3 rounded-full shrink-0"
                         style={{ backgroundColor: selectedMember.color }}
                       />
-                      <div>
-                        <div className="text-xs font-bold flex items-center gap-1">
-                          <span>{selectedMember.name}</span>
-                        </div>
-                        <div className="text-[9px] text-slate-500 font-mono uppercase tracking-wider">{selectedMember.instrument}</div>
-                      </div>
-                    </div>
-
-                    {/* Custom Label/Numbering input as requested */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-[9px] text-slate-500 font-mono">No.</span>
-                      <input
-                        type="text"
-                        placeholder="A1, T1..."
-                        value={memberCustomLabels[selectedMember.id] || ""}
-                        onChange={(e) => onUpdateMemberCustomLabel(selectedMember.id, e.target.value)}
-                        className="w-14 bg-slate-800 border border-slate-700 text-[10px] font-bold text-slate-200 px-1 py-0.5 rounded text-center focus:outline-none focus:border-blue-500 font-mono"
-                        title="各自の立ち位置番号を割り当てます"
-                      />
+                      <span className="text-sm font-black font-mono text-white tracking-wide">
+                        {getEffectiveMemberLabel(selectedMember, members, memberCustomLabels)}
+                      </span>
                     </div>
                   </div>
 
@@ -466,11 +515,7 @@ export default function RightSidebar({
                                         <div className="text-xs font-extrabold text-blue-400">
                                           {inst.resolved}
                                         </div>
-                                        {inst.original !== inst.resolved && (
-                                          <div className="text-[9px] text-slate-500 font-mono mt-0.5">
-                                            式: {inst.original} (x={memberVariables[selectedMember.id] ?? 0})
-                                          </div>
-                                        )}
+                                        
                                       </div>
                                       <div className="flex items-center gap-1 shrink-0">
                                         <button
@@ -526,11 +571,70 @@ export default function RightSidebar({
                   </div>
                 </>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center py-12 text-slate-500">
-                  <HelpCircle className="w-8 h-8 text-slate-700 mb-2" />
-                  <p className="text-xs leading-relaxed">
-                    フィールド上、または「部員」タブから部員を選択すると、座標・歩数計算（コマ表）がリアルタイムに表示されます。
-                  </p>
+                <div className="space-y-3">
+                  <div className="bg-slate-800/80 border border-slate-700/80 p-2.5 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between border-b border-slate-700 pb-1">
+                      <span className="text-xs font-extrabold text-blue-400 flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span>No. {currentSet ? currentSet.number : "---"} の全体・グループ指定</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono font-bold">
+                        {currentSet?.counts || 16} counts
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed pt-0.5">
+                      部員未選択時の指定一覧です。部員をタップすると個人の歩数計算が表示されます。
+                    </p>
+                  </div>
+
+                  {currentSetInsts.length > 0 ? (
+                    <div className="space-y-2">
+                      {currentSetInsts.map((inst) => {
+                        let label = "全員";
+                        let badgeColor = "bg-blue-950 text-blue-300 border-blue-700/80";
+
+                        if (inst.targetType === "group") {
+                          const grp = memberGroups.find(
+                            (g) => g.id === inst.targetValue || g.name === inst.targetValue
+                          );
+                          label = grp ? `グループ: ${grp.name}` : `グループ: ${inst.targetValue}`;
+                          badgeColor = "bg-amber-950 text-amber-300 border-amber-700/80";
+                        } else if (inst.targetType === "instrument") {
+                          label = `パート: ${inst.targetValue}`;
+                          badgeColor = "bg-purple-950 text-purple-300 border-purple-700/80";
+                        } else if (inst.targetType === "individual") {
+                          const m = members.find((mb) => String(mb.id) === String(inst.targetValue));
+                          label = m ? `個人: ${getEffectiveMemberLabel(m, members, memberCustomLabels)}` : `個人: ${inst.targetValue}`;
+                          badgeColor = "bg-emerald-950 text-emerald-300 border-emerald-700/80";
+                        }
+
+                        return (
+                          <div
+                            key={inst.id}
+                            className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg space-y-1"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${badgeColor}`}
+                              >
+                                {label}
+                              </span>
+                            </div>
+                            <div className="text-xs font-bold text-slate-100 font-mono tracking-wide pt-1">
+                              {inst.instructionText}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-6 text-center text-slate-400 text-xs italic">
+                      このNo.に登録された動き指定はありません。
+                      <span className="text-[10px] text-slate-500 not-italic block mt-1">
+                        「指定」タブから Build / Halt 等の指定を追加できます。
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -542,11 +646,8 @@ export default function RightSidebar({
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             <div className="border-b border-slate-200 pb-1.5 shrink-0">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                現在のNo. ({currentSet ? `No. ${currentSet.number}` : "未選択"}) の指定
+                No.{currentSet ? currentSet.number : "未選択"}の指定
               </span>
-              <p className="text-[9.5px] text-slate-500 leading-relaxed mt-0.5">
-                「全員」「パート（楽器）別」「個人」の単位で直線・曲線などの動きを指定。変数 <code className="bg-slate-100 font-bold px-0.5 text-amber-700">x</code> や四則演算を含めると各自の値に自動解決されます。
-              </p>
             </div>
 
             {currentSet ? (
@@ -557,9 +658,9 @@ export default function RightSidebar({
                   
                   {/* Target selection */}
                   <div>
-                    <label className="text-[9px] text-slate-400 block mb-1 uppercase font-semibold">対象グループ</label>
-                    <div className="grid grid-cols-3 gap-1">
-                      {(["all", "instrument", "individual"] as const).map((type) => (
+                    <label className="text-[9px] text-slate-400 block mb-1 uppercase font-semibold">対象</label>
+                    <div className="grid grid-cols-4 gap-1">
+                      {(["all", "instrument", "group", "individual"] as const).map((type) => (
                         <button
                           key={type}
                           type="button"
@@ -567,17 +668,19 @@ export default function RightSidebar({
                             setNewInstTargetType(type);
                             if (type === "instrument") {
                               setNewInstTargetValue(instruments[0] || "");
+                            } else if (type === "group") {
+                              setNewInstTargetValue(memberGroups[0] ? memberGroups[0].id : "");
                             } else if (type === "individual") {
                               setNewInstTargetValue(members[0] ? String(members[0].id) : "");
                             }
                           }}
-                          className={`py-1 rounded text-[10px] font-bold border transition ${
+                          className={`py-1 rounded text-[10px] font-bold border transition cursor-pointer ${
                             newInstTargetType === type
                               ? "bg-blue-50 border-blue-400 text-blue-700"
-                              : "bg-slate-50 border-slate-200 text-slate-600"
+                              : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                           }`}
                         >
-                          {type === "all" ? "全員" : type === "instrument" ? "パート別" : "個人別"}
+                          {type === "all" ? "全員" : type === "instrument" ? "パート別" : type === "group" ? "グループ別" : "個人別"}
                         </button>
                       ))}
                     </div>
@@ -586,7 +689,6 @@ export default function RightSidebar({
                   {/* Target value inputs based on selection */}
                   {newInstTargetType === "instrument" && (
                     <div>
-                      <label className="text-[9px] text-slate-400 block mb-1 font-semibold">対象パート</label>
                       <select
                         value={newInstTargetValue}
                         onChange={(e) => setNewInstTargetValue(e.target.value)}
@@ -604,9 +706,27 @@ export default function RightSidebar({
                     </div>
                   )}
 
+                  {newInstTargetType === "group" && (
+                    <div>
+                      <select
+                        value={newInstTargetValue}
+                        onChange={(e) => setNewInstTargetValue(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-700"
+                      >
+                        {memberGroups.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name} ({g.memberIds.length}名)
+                          </option>
+                        ))}
+                        {memberGroups.length === 0 && (
+                          <option value="">グループ未作成（「変数・グループ」タブで作成可能）</option>
+                        )}
+                      </select>
+                    </div>
+                  )}
+
                   {newInstTargetType === "individual" && (
                     <div>
-                      <label className="text-[9px] text-slate-400 block mb-1 font-semibold">対象部員</label>
                       <select
                         value={newInstTargetValue}
                         onChange={(e) => setNewInstTargetValue(e.target.value)}
@@ -626,9 +746,8 @@ export default function RightSidebar({
 
                   {/* Instruction Input Builder Section */}
                   <div className="space-y-2 bg-slate-50 border border-slate-200/80 p-2 rounded-lg">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200">
-                      <span className="text-[10px] font-bold text-slate-700">動作フェーズ・ビルダー (簡単入力)</span>
-                      <span className="text-[9px] text-slate-400">No.のカウント: {currentSet ? currentSet.counts : 16} counts</span>
+                    <div className="flex items-center justify-end pb-1 border-b border-slate-200">
+                      <span className="text-[9px] text-slate-400 font-mono">{currentSet ? currentSet.counts : 16} counts</span>
                     </div>
 
                     {/* Step 1: Phase Action Selection */}
@@ -762,6 +881,8 @@ export default function RightSidebar({
                                 ? "全員"
                                 : inst.targetType === "instrument"
                                 ? `パート: ${inst.targetValue}`
+                                : inst.targetType === "group"
+                                ? `グループ: ${memberGroups.find((g) => g.id === inst.targetValue || g.name === inst.targetValue)?.name || inst.targetValue}`
                                 : `個人: ${members.find((m) => String(m.id) === inst.targetValue)?.name || "部員"}`}
                             </span>
                             <p className="text-xs font-bold text-slate-800 font-mono leading-relaxed mt-1">
@@ -828,7 +949,9 @@ export default function RightSidebar({
             {/* 変数グループ一覧 & 管理エリア */}
             <div className="bg-slate-100/80 p-2 rounded-lg border border-slate-200 shrink-0 space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">保存済み変数グループ ({memberGroups.length})</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase">
+                  No. {currentSet ? currentSet.number : ""} のグループ ({memberGroups.length})
+                </span>
                 <button
                   type="button"
                   onClick={() => setShowGroupCreator(!showGroupCreator)}
@@ -884,24 +1007,34 @@ export default function RightSidebar({
               )}
 
               {/* グループバッジリスト */}
-              <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto pr-1">
+              <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pr-1">
                 {memberGroups.length === 0 ? (
                   <span className="text-[10px] text-slate-400 italic">グループはありません。「x値で自動グループ化」を押すと即作成されます</span>
                 ) : (
-                  memberGroups.map((g) => (
-                    <div key={g.id} className="bg-white border border-slate-200 rounded px-1.5 py-0.5 flex items-center gap-1.5 shadow-2xs text-[10px]">
-                      <span className="font-bold text-slate-700">{g.name}</span>
-                      <span className="text-[9px] bg-slate-100 text-slate-500 font-mono px-1 rounded">{g.memberIds.length}名</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteGroup(g.id)}
-                        className="text-slate-300 hover:text-red-500 font-bold ml-0.5"
-                        title="グループを削除"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))
+                  memberGroups.map((g) => {
+                    return (
+                      <div key={g.id} className="bg-white border border-slate-200 hover:border-blue-300 rounded-lg px-2 py-1 flex items-center gap-1.5 shadow-2xs text-[10.5px] group">
+                        <span className="font-bold text-slate-700 truncate max-w-[110px]">{g.name}</span>
+                        <span className="text-[9px] bg-blue-50 text-blue-700 font-bold font-mono px-1.5 py-0.2 rounded-full shrink-0">{g.memberIds.length}名</span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditGroup(g)}
+                          className="p-1 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded transition cursor-pointer flex items-center justify-center"
+                          title="グループ名やメンバーの編集"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteGroup(g.id)}
+                          className="p-0.5 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded transition cursor-pointer"
+                          title="グループを削除"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -913,7 +1046,7 @@ export default function RightSidebar({
               </div>
               <div className="flex-1 overflow-y-auto space-y-1 bg-slate-50/70 p-1.5 rounded-lg border border-slate-200 shadow-inner">
                 {members.map((m) => {
-                  const mLabel = memberCustomLabels[m.id] || "";
+                  const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
                   return (
                     <div key={m.id} className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200/80 shadow-2xs hover:border-slate-300 transition">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -923,7 +1056,7 @@ export default function RightSidebar({
                         />
                         <div className="text-[11px] font-semibold text-slate-800 truncate">
                           {mLabel && (
-                            <span className="bg-slate-100 text-slate-500 font-mono text-[8px] font-bold px-1 rounded mr-1">
+                            <span className="font-mono font-bold text-slate-900 mr-1.5">
                               {mLabel}
                             </span>
                           )}
@@ -956,22 +1089,29 @@ export default function RightSidebar({
         {/* TAB 5: WARNINGS (COLLISIONS & PROXIMITY) */}
         {activeTab === "warnings" && (
           <div className="flex-1 flex flex-col overflow-hidden p-2.5 space-y-2.5 bg-slate-50/50">
-            <div className="border-b border-slate-200 pb-2 shrink-0">
+            <div className="border-b border-slate-200 pb-2.5 shrink-0 flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-red-600 font-bold text-xs">
                 <AlertTriangle className="w-4 h-4 shrink-0 animate-pulse" />
                 <span>全No. 衝突・接近 警告一覧</span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                全No.の静止位置および移動途中の経路を自動スキャン。衝突(<span className="font-bold underline text-red-600">0.8歩未満</span>)や接近(<span className="font-bold text-amber-600">1.4歩未満</span>)のペアを表示します。
-              </p>
+              <button
+                type="button"
+                onClick={onToggleCollisionDetection}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5 border cursor-pointer shadow-2xs ${
+                  enableCollisionDetection
+                    ? "bg-red-600 text-white border-red-700 hover:bg-red-700"
+                    : "bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-300"
+                }`}
+                title="フィールド上での衝突警告表示（赤枠・バナー）のオン/オフ"
+              >
+                <span>フィールド上表示: {enableCollisionDetection ? "ON" : "OFF"}</span>
+              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5">
               {allSetCollisions.length === 0 ? (
-                <div className="text-center py-10 bg-white rounded-xl border border-slate-200/80 text-slate-400 p-4 shadow-2xs space-y-2">
-                  <div className="text-3xl">🎉</div>
+                <div className="text-center py-8 bg-white rounded-xl border border-slate-200/80 text-slate-600 p-4 shadow-2xs">
                   <p className="text-xs font-bold text-slate-700">衝突・接近の警告はありません</p>
-                  <p className="text-[10px] leading-relaxed">すべてのNo.の配置・移動間隔が安全に保たれています。</p>
                 </div>
               ) : (
                 allSetCollisions.map((sc) => (
@@ -991,7 +1131,7 @@ export default function RightSidebar({
                       <button
                         type="button"
                         onClick={() => onSelectSet?.(sc.setId)}
-                        className="text-[10px] bg-white hover:bg-red-600 text-red-600 hover:text-white font-bold px-2 py-0.5 rounded border border-red-200 transition shadow-2xs"
+                        className="text-[10px] bg-white hover:bg-red-600 text-red-600 hover:text-white font-bold px-2 py-0.5 rounded border border-red-200 transition shadow-2xs cursor-pointer"
                       >
                         移動 →
                       </button>
@@ -999,25 +1139,19 @@ export default function RightSidebar({
 
                     <div className="p-2 space-y-1.5 divide-y divide-slate-100">
                       {sc.pairs.map((pair, pIdx) => (
-                        <div key={pIdx} className="pt-1.5 first:pt-0 flex flex-col gap-0.5 text-[11px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1 min-w-0">
-                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pair.m1.color }} />
-                              <span className="font-bold truncate text-slate-800">{pair.m1.name}</span>
-                              <span className="text-slate-400 font-bold">↔</span>
-                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pair.m2.color }} />
-                              <span className="font-bold truncate text-slate-800">{pair.m2.name}</span>
-                            </div>
-                            {pair.isSevere ? (
-                              <span className="bg-red-600 text-white text-[8px] font-black px-1 py-0.5 rounded shrink-0">衝突危険!</span>
-                            ) : (
-                              <span className="bg-amber-100 text-amber-800 text-[8px] font-bold px-1 py-0.5 rounded shrink-0">接近</span>
-                            )}
+                        <div key={pIdx} className="pt-1.5 first:pt-0 flex items-center justify-between text-[11px]">
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pair.m1.color }} />
+                            <span className="font-bold truncate text-slate-800">{pair.m1.name}</span>
+                            <span className="text-slate-400 font-bold">↔</span>
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pair.m2.color }} />
+                            <span className="font-bold truncate text-slate-800">{pair.m2.name}</span>
                           </div>
-                          <div className="flex items-center justify-between text-[9px] text-slate-400 pl-3">
-                            <span>{pair.timeDesc || "静止時"}</span>
-                            <span className="font-mono font-bold text-slate-600">距離 {pair.dist}歩</span>
-                          </div>
+                          {pair.isSevere ? (
+                            <span className="bg-red-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0">衝突危険!</span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-800 text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0">接近</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1028,6 +1162,200 @@ export default function RightSidebar({
           </div>
         )}
       </div>
+
+      {/* --- グループメンバー編集（追加・削除）モーダル --- */}
+      {editingGroup && (
+        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            {/* モーダルヘッダー */}
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">グループ構成の編集</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">メンバーの追加・削除やグループ名の変更ができます</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingGroup(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-full transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+              {/* グループ名編集 */}
+              <div>
+                <label className="text-xs text-slate-700 font-bold block mb-1">グループ名</label>
+                <input
+                  type="text"
+                  value={editGroupName}
+                  onChange={(e) => setEditGroupName(e.target.value)}
+                  placeholder="グループ名を入力"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                />
+              </div>
+
+              {/* 現在の参加メンバー一覧（クイック削除チップ） */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-xs font-bold text-slate-700">
+                    現在のグループメンバー ({editGroupMemberIds.length}名)
+                  </span>
+                  {editGroupMemberIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditGroupMemberIds([])}
+                      className="text-[11px] text-red-500 hover:text-red-600 font-bold hover:underline cursor-pointer"
+                    >
+                      メンバーを全解除
+                    </button>
+                  )}
+                </div>
+
+                {editGroupMemberIds.length === 0 ? (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3 text-center font-medium">
+                    メンバーが選択されていません。下のリストから追加してください。
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200 max-h-32 overflow-y-auto">
+                    {editGroupMemberIds.map((id) => {
+                      const m = members.find((mem) => mem.id === id);
+                      if (!m) return null;
+                      const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
+                      return (
+                        <div
+                          key={id}
+                          className="bg-white border border-slate-200/80 shadow-2xs rounded-lg px-2 py-1 flex items-center gap-1.5 text-xs"
+                        >
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                          <span className="font-bold text-slate-800">
+                            {mLabel ? `${mLabel} ` : ""}
+                            {m.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleMemberInEditGroup(id)}
+                            className="text-slate-400 hover:text-red-500 p-0.5 rounded transition cursor-pointer"
+                            title="グループから削除"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 部員の追加・選択リスト */}
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700">メンバーの追加・削除 (部員一覧)</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditGroupMemberIds(members.map((m) => m.id))}
+                      className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded-lg transition cursor-pointer"
+                    >
+                      全員追加
+                    </button>
+                  </div>
+                </div>
+
+                {/* 検索・パートフィルター */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="部員名・番号で検索..."
+                    value={editGroupSearch}
+                    onChange={(e) => setEditGroupSearch(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    value={editGroupInstFilter}
+                    onChange={(e) => setEditGroupInstFilter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">すべてのパート ({instruments.length})</option>
+                    {instruments.map((inst) => (
+                      <option key={inst} value={inst}>
+                        {inst}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* チェックボックス付きリスト */}
+                <div className="border border-slate-200 rounded-xl p-2 bg-slate-50 max-h-52 overflow-y-auto space-y-1">
+                  {members
+                    .filter((m) => {
+                      if (editGroupInstFilter && m.instrument !== editGroupInstFilter) return false;
+                      if (editGroupSearch) {
+                        const query = editGroupSearch.toLowerCase();
+                        const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels).toLowerCase();
+                        return m.name.toLowerCase().includes(query) || mLabel.includes(query);
+                      }
+                      return true;
+                    })
+                    .map((m) => {
+                      const checked = editGroupMemberIds.includes(m.id);
+                      const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
+                      return (
+                        <label
+                          key={m.id}
+                          className={`flex items-center justify-between p-2 rounded-lg border transition cursor-pointer text-xs ${
+                            checked
+                              ? "bg-blue-50/80 border-blue-200 text-blue-950 font-bold"
+                              : "bg-white border-slate-200/60 text-slate-700 hover:bg-slate-100/60"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => handleToggleMemberInEditGroup(m.id)}
+                              className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                            />
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                            <span className="truncate">
+                              {mLabel && <span className="font-mono text-xs mr-1 text-slate-900 font-bold">{mLabel}</span>}
+                              {m.name}
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            {/* モーダルフッター */}
+            <div className="flex justify-end items-center gap-2 pt-3 border-t border-slate-100 shrink-0">
+              <button
+                type="button"
+                onClick={() => setEditingGroup(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 font-semibold rounded-xl text-xs transition cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGroupEdit}
+                disabled={!editGroupName.trim()}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-xs transition shadow-md shadow-blue-600/20 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>グループ更新 ({editGroupMemberIds.length}名)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

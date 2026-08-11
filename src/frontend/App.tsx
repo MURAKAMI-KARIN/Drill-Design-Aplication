@@ -7,6 +7,9 @@ import {
   calculateMoveInstructions,
   getYardLocationDescription,
   evaluateInstructionFormula,
+  getInstrumentPrefix,
+  generateNextMemberLabel,
+  getEffectiveMemberLabel,
 } from "./lib/marchingUtils";
 import {
   Play,
@@ -23,17 +26,20 @@ import {
   Layers,
   BookOpen,
   ChevronRight,
+  User,
   UserPlus,
   Home,
   Layout,
   Sliders,
   Settings,
+  Keyboard,
   HelpCircle,
   Menu,
   ChevronLeft,
   RotateCcw,
   Check,
   Bookmark,
+  Printer,
   X,
 } from "lucide-react";
 
@@ -47,7 +53,7 @@ const DEFAULT_TEMPLATES: FieldTemplate[] = [
     gridSizeY: 10,
     gridLineWidth: 1,
     gridLineStyle: "solid",
-    subGridLineStyle: "dashed",
+    subGridLineStyle: "solid",
     gridLineColor: "rgba(0,0,0,0.15)",
     backgroundColor: "#ffffff",
     showGridLines: true,
@@ -66,23 +72,23 @@ const DEFAULT_TEMPLATES: FieldTemplate[] = [
       { id: "cm_6", x: 0.7, y: 0.7 },
       { id: "cm_7", x: 0.3, y: 0.7 },
       { id: "cm_8", x: 0.7, y: 0.3 },
-      { id: "cm_9", x: 0.7, y: 0.10666666666666667, shape: "t_down" },
-      { id: "cm_10", x: 0.5, y: 0.10666666666666667, shape: "t_down" },
-      { id: "cm_11", x: 0.3, y: 0.10666666666666667, shape: "t_down" },
+      { id: "cm_9", x: 0.7, y: 0.04, shape: "t_down" },
+      { id: "cm_10", x: 0.5, y: 0.04, shape: "t_down" },
+      { id: "cm_11", x: 0.3, y: 0.04, shape: "t_down" },
       { id: "cm_12", x: 0.1, y: 0.1, shape: "l_top_left" },
-      { id: "cm_13", x: 0.10666666666666667, y: 0.3, shape: "t_right" },
-      { id: "cm_14", x: 0.10666666666666667, y: 0.7, shape: "t_right" },
-      { id: "cm_15", x: 0.10666666666666667, y: 0.5, shape: "t_right" },
+      { id: "cm_13", x: 0.04, y: 0.3, shape: "t_right" },
+      { id: "cm_14", x: 0.04, y: 0.7, shape: "t_right" },
+      { id: "cm_15", x: 0.04, y: 0.5, shape: "t_right" },
       { id: "cm_16", x: 0.9, y: 0.1, shape: "l_top_right" },
-      { id: "cm_17", x: 0.8933333333333333, y: 0.3, shape: "t_left" },
-      { id: "cm_18", x: 0.8933333333333333, y: 0.5, shape: "t_left" },
+      { id: "cm_17", x: 0.96, y: 0.3, shape: "t_left" },
+      { id: "cm_18", x: 0.96, y: 0.5, shape: "t_left" },
       { id: "cm_19", x: 0.9, y: 0.9, shape: "l_bottom_right" },
-      { id: "cm_20", x: 0.8933333333333333, y: 0.7, shape: "t_left" },
+      { id: "cm_20", x: 0.96, y: 0.7, shape: "t_left" },
       { id: "cm_21", x: 0.1, y: 0.9, shape: "l_bottom_left" },
-      { id: "cm_22", x: 0.5, y: 0.9, shape: "t_up" },
-      { id: "cm_23", x: 0.3, y: 0.9, shape: "t_up" },
-      { id: "cm_24", x: 0.7, y: 0.9, shape: "t_up" },
-      { id: "cm_25", x: 0.5, y: 0.5 },
+      { id: "cm_22", x: 0.5, y: 0.96, shape: "t_up" },
+      { id: "cm_23", x: 0.3, y: 0.96, shape: "t_up" },
+      { id: "cm_24", x: 0.7, y: 0.96, shape: "t_up" },
+      { id: "cm_25", x: 0.5, y: 0.5, shape: "x" },
     ]
   }
 ];
@@ -142,10 +148,14 @@ export default function App() {
 
   const [selectedSetId, setSelectedSetId] = useState<number | null>(null);
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
+  const [snapMode, setSnapMode] = useState<"on" | "none">("on");
+  const [enableCollisionDetection, setEnableCollisionDetection] = useState<boolean>(true);
   const [showGhost, setShowGhost] = useState<boolean>(true);
 
   // コンテ・音源設定モーダルの開閉
   const [showFormationSettingsModal, setShowFormationSettingsModal] = useState<boolean>(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
 
   // 配置（整列）ツール状態
   const [isAlignToolActive, setIsAlignToolActive] = useState<boolean>(false);
@@ -176,8 +186,9 @@ export default function App() {
   const [designerGridSizeY, setDesignerGridSizeY] = useState<number>(10);
   const [designerGridLineWidth, setDesignerGridLineWidth] = useState<number>(1);
   const [designerGridLineStyle, setDesignerGridLineStyle] = useState<"solid" | "dashed" | "dotted">("solid");
-  const [designerSubGridLineStyle, setDesignerSubGridLineStyle] = useState<"solid" | "dashed" | "dotted">("dashed");
+  const [designerSubGridLineStyle, setDesignerSubGridLineStyle] = useState<"solid" | "dashed" | "dotted">("solid");
   const [selectedDesignerMarkerId, setSelectedDesignerMarkerId] = useState<string | null>(null);
+  const [copiedMarker, setCopiedMarker] = useState<CustomMarker | null>(null);
   const [designerGridLineColor, setDesignerGridLineColor] = useState<string>("rgba(0,0,0,0.15)");
   const [designerBackgroundColor, setDesignerBackgroundColor] = useState<string>("#ffffff");
   const [designerShowGridLines, setDesignerShowGridLines] = useState<boolean>(true);
@@ -211,8 +222,10 @@ export default function App() {
   const [memberVariables, setMemberVariables] = useState<Record<number, Record<number, number>>>({});
   // 部員ごとの立ち位置番号 (Custom labels/numbering)
   const [memberCustomLabels, setMemberCustomLabels] = useState<Record<number, string>>({});
-  // 部員変数グループ
-  const [memberGroups, setMemberGroups] = useState<MemberGroup[]>([]);
+  // コマ表上の部員名表示（オン/オフ）
+  const [showMemberLabels, setShowMemberLabels] = useState<boolean>(true);
+  // 部員変数グループ (セットID -> MemberGroup[])
+  const [memberGroupsBySet, setMemberGroupsBySet] = useState<Record<number, MemberGroup[]>>({});
   // 右サイドバーで表示するタブ（警告タブへの切り替え用）
   const [activeRightSidebarTab, setActiveRightSidebarTab] = useState<"personnel" | "dotbook" | "instructions" | "variables" | "warnings">("personnel");
 
@@ -261,33 +274,53 @@ export default function App() {
   const [showNewMemberModal, setShowNewMemberModal] = useState<boolean>(false);
   const [newMemberName, setNewMemberName] = useState<string>("");
   const [newMemberInstrument, setNewMemberInstrument] = useState<string>("Trumpet");
+  const [newMemberLabel, setNewMemberLabel] = useState<string>("");
   const [newMemberColor, setNewMemberColor] = useState<string>("#3B82F6");
 
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [editMemberName, setEditMemberName] = useState<string>("");
   const [editMemberInstrument, setEditMemberInstrument] = useState<string>("Trumpet");
+  const [editMemberLabel, setEditMemberLabel] = useState<string>("");
   const [editMemberColor, setEditMemberColor] = useState<string>("#3B82F6");
+
+  const openNewMemberModal = () => {
+    const defaultInst = "Trumpet";
+    setNewMemberInstrument(defaultInst);
+    setNewMemberName("");
+    setNewMemberColor("#3B82F6");
+    const autoLabel = generateNextMemberLabel(defaultInst, members, memberCustomLabels);
+    setNewMemberLabel(autoLabel);
+    setShowNewMemberModal(true);
+  };
+
+  const handleNewMemberInstrumentChange = (inst: string) => {
+    setNewMemberInstrument(inst);
+    const autoLabel = generateNextMemberLabel(inst, members, memberCustomLabels);
+    setNewMemberLabel(autoLabel);
+  };
 
   const openEditMemberModal = (m: Member) => {
     setEditingMember(m);
-    setEditMemberName(m.name);
+    setEditMemberName(m.name || "");
     setEditMemberInstrument(m.instrument || "Trumpet");
     setEditMemberColor(m.color || "#3B82F6");
+    const currentLbl = getEffectiveMemberLabel(m, members, memberCustomLabels);
+    setEditMemberLabel(currentLbl);
   };
 
   // 一般的な楽器一覧
   const instruments = [
     "Trumpet",
-    "Mellophone",
+    "Horn",
     "Trombone",
     "Euphonium",
-    "Tuba",
+    "Sousaphone",
     "Flute",
     "Clarinet",
     "Alto Sax",
     "Tenor Sax",
     "Snare Drum",
-    "Tenor Drum",
+    "Quint",
     "Bass Drum",
     "Cymbals",
     "Color Guard",
@@ -336,15 +369,55 @@ export default function App() {
           return true;
         });
 
-        // デフォルトテンプレート（ユーザー作成の白背景「大学」テンプレート）を必ず同期・先頭に保持する
-        DEFAULT_TEMPLATES.forEach((defT) => {
-          const idx = merged.findIndex((t) => t.id === defT.id || (t.name === "大学" && t.id.startsWith("template_")));
-          if (idx !== -1) {
-            merged[idx] = { ...defT };
-          } else {
-            merged.unshift(defT);
-          }
-        });
+        // 初期テンプレート (template_1) の更新統合
+        // ユーザーが画面上で作成した「1」または「１」という名前のテンプレートがあれば、その設定をデフォルトの「1」 (template_1) に統合
+        const customTemplateOne = parsed.find((t) => (t.name?.trim() === "1" || t.name?.trim() === "１") && t.id !== "template_1");
+        
+        let primaryTemplateOne = merged.find((t) => t.id === "template_1");
+        if (!primaryTemplateOne) {
+          primaryTemplateOne = { ...DEFAULT_TEMPLATES[0] };
+        } else {
+          primaryTemplateOne.name = "大学";
+        }
+        primaryTemplateOne.gridLineStyle = "solid";
+        primaryTemplateOne.subGridLineStyle = "solid";
+
+        if (customTemplateOne) {
+          primaryTemplateOne = {
+            ...primaryTemplateOne,
+            id: "template_1",
+            name: "大学",
+            fieldWidth: customTemplateOne.fieldWidth ?? primaryTemplateOne.fieldWidth ?? 150,
+            fieldHeight: customTemplateOne.fieldHeight ?? primaryTemplateOne.fieldHeight ?? 150,
+            gridSizeX: customTemplateOne.gridSizeX ?? primaryTemplateOne.gridSizeX ?? 10,
+            gridSizeY: customTemplateOne.gridSizeY ?? primaryTemplateOne.gridSizeY ?? 10,
+            gridLineWidth: customTemplateOne.gridLineWidth ?? primaryTemplateOne.gridLineWidth ?? 1,
+            gridLineStyle: customTemplateOne.gridLineStyle ?? primaryTemplateOne.gridLineStyle ?? "solid",
+            subGridLineStyle: customTemplateOne.subGridLineStyle ?? primaryTemplateOne.subGridLineStyle ?? "solid",
+            gridLineColor: customTemplateOne.gridLineColor ?? primaryTemplateOne.gridLineColor ?? "rgba(0,0,0,0.15)",
+            backgroundColor: customTemplateOne.backgroundColor ?? primaryTemplateOne.backgroundColor ?? "#ffffff",
+            showGridLines: customTemplateOne.showGridLines !== false,
+            markingShape: customTemplateOne.markingShape ?? primaryTemplateOne.markingShape ?? "cross",
+            blocksX: customTemplateOne.blocksX ?? primaryTemplateOne.blocksX ?? 15,
+            blocksY: customTemplateOne.blocksY ?? primaryTemplateOne.blocksY ?? 15,
+            subdivisionsX: customTemplateOne.subdivisionsX ?? primaryTemplateOne.subdivisionsX ?? 10,
+            subdivisionsY: customTemplateOne.subdivisionsY ?? primaryTemplateOne.subdivisionsY ?? 10,
+            markerColor: customTemplateOne.markerColor ?? primaryTemplateOne.markerColor ?? "#000000",
+            customMarkers: customTemplateOne.customMarkers ? JSON.parse(JSON.stringify(customTemplateOne.customMarkers)) : (primaryTemplateOne.customMarkers || []),
+          };
+          // 重複している個別カスタム「1」を除去
+          merged = merged.filter((t) => t.id !== customTemplateOne.id);
+        }
+
+        // template_1 を先頭に配置
+        const idx1 = merged.findIndex((t) => t.id === "template_1");
+        if (idx1 !== -1) {
+          merged[idx1] = primaryTemplateOne;
+        } else {
+          merged.unshift(primaryTemplateOne);
+        }
+
+        DEFAULT_TEMPLATES[0] = { ...primaryTemplateOne };
         setFieldTemplates(merged);
         localStorage.setItem("drillflow_field_templates", JSON.stringify(merged));
       } catch (e) {
@@ -480,12 +553,18 @@ export default function App() {
       setMemberCustomLabels({});
     }
 
-    // 変数グループのロード
-    const savedGroups = localStorage.getItem(`drillflow_member_groups_${id}`);
-    if (savedGroups) {
-      setMemberGroups(JSON.parse(savedGroups));
+    // 変数グループのロード (セットIDごと)
+    const savedSetGroups = localStorage.getItem(`drillflow_set_groups_${id}`);
+    if (savedSetGroups) {
+      setMemberGroupsBySet(JSON.parse(savedSetGroups));
     } else {
-      setMemberGroups(formation.memberGroups || []);
+      const oldGroups = localStorage.getItem(`drillflow_member_groups_${id}`);
+      const parsedOld = oldGroups ? JSON.parse(oldGroups) : (formation.memberGroups || []);
+      const initMap: Record<number, MemberGroup[]> = {};
+      formation.sets?.forEach((s) => {
+        initMap[s.id] = s.memberGroups || parsedOld;
+      });
+      setMemberGroupsBySet(initMap);
     }
 
     // フォーメーションスタイルのロード
@@ -521,7 +600,7 @@ export default function App() {
       formation.gridLineColor = style.gridLineColor ?? formation.gridLineColor ?? "rgba(0,0,0,0.15)";
       formation.gridLineWidth = style.gridLineWidth ?? formation.gridLineWidth ?? 1;
       formation.gridLineStyle = style.gridLineStyle ?? formation.gridLineStyle ?? "solid";
-      formation.subGridLineStyle = style.subGridLineStyle ?? formation.subGridLineStyle ?? "dashed";
+      formation.subGridLineStyle = style.subGridLineStyle ?? formation.subGridLineStyle ?? "solid";
       formation.showYardLines = style.showYardLines !== undefined ? style.showYardLines : false;
       formation.showYardNumbers = style.showYardNumbers !== undefined ? style.showYardNumbers : true;
       formation.showGridLines = style.showGridLines !== undefined ? style.showGridLines : true;
@@ -556,7 +635,7 @@ export default function App() {
       formation.gridLineColor = formation.gridLineColor ?? "rgba(0,0,0,0.15)";
       formation.gridLineWidth = formation.gridLineWidth ?? 1;
       formation.gridLineStyle = formation.gridLineStyle ?? "solid";
-      formation.subGridLineStyle = formation.subGridLineStyle ?? "dashed";
+      formation.subGridLineStyle = formation.subGridLineStyle ?? "solid";
       formation.showYardLines = formation.showYardLines ?? false;
       formation.showYardNumbers = formation.showYardNumbers ?? true;
       formation.showGridLines = formation.showGridLines ?? true;
@@ -747,7 +826,7 @@ export default function App() {
         setDesignerGridSizeY(template.gridSizeY ?? 10);
         setDesignerGridLineWidth(template.gridLineWidth ?? 1);
         setDesignerGridLineStyle(template.gridLineStyle ?? "solid");
-        setDesignerSubGridLineStyle(template.subGridLineStyle ?? "dashed");
+        setDesignerSubGridLineStyle(template.subGridLineStyle ?? "solid");
         setDesignerGridLineColor(template.gridLineColor ?? "rgba(0,0,0,0.15)");
         setDesignerBackgroundColor(template.backgroundColor ?? "#ffffff");
         setDesignerShowGridLines(template.showGridLines ?? true);
@@ -770,7 +849,7 @@ export default function App() {
       setDesignerGridSizeY(10);
       setDesignerGridLineWidth(1);
       setDesignerGridLineStyle("solid");
-      setDesignerSubGridLineStyle("dashed");
+      setDesignerSubGridLineStyle("solid");
       setDesignerGridLineColor("rgba(0,0,0,0.15)");
       setDesignerBackgroundColor("#ffffff");
       setDesignerShowGridLines(false);
@@ -861,7 +940,7 @@ export default function App() {
       gridLineColor: chosenTemplate.gridLineColor,
       gridLineWidth: chosenTemplate.gridLineWidth,
       gridLineStyle: chosenTemplate.gridLineStyle,
-      subGridLineStyle: chosenTemplate.subGridLineStyle || "dashed",
+      subGridLineStyle: chosenTemplate.subGridLineStyle || "solid",
       showYardLines: chosenTemplate.showYardLines,
       showYardNumbers: chosenTemplate.showYardNumbers,
       showGridLines: chosenTemplate.showGridLines,
@@ -963,7 +1042,7 @@ export default function App() {
           customMarkers: activeFormation.customMarkers || [],
           sets: activeFormation.sets,
           members: members,
-          memberGroups: memberGroups,
+          memberGroupsBySet: memberGroupsBySet,
         }),
       });
     } catch (error) {
@@ -984,8 +1063,8 @@ export default function App() {
       JSON.stringify(memberCustomLabels)
     );
     localStorage.setItem(
-      `drillflow_member_groups_${activeFormation.id}`,
-      JSON.stringify(memberGroups)
+      `drillflow_set_groups_${activeFormation.id}`,
+      JSON.stringify(memberGroupsBySet)
     );
 
     const styleKey = `drillflow_formation_style_${activeFormation.id}`;
@@ -997,7 +1076,7 @@ export default function App() {
       gridLineColor: activeFormation.gridLineColor || "rgba(0,0,0,0.15)",
       gridLineWidth: activeFormation.gridLineWidth || 1,
       gridLineStyle: activeFormation.gridLineStyle || "solid",
-      subGridLineStyle: activeFormation.subGridLineStyle || "dashed",
+      subGridLineStyle: activeFormation.subGridLineStyle || "solid",
       showYardLines: activeFormation.showYardLines !== false,
       showYardNumbers: activeFormation.showYardNumbers !== false,
       showGridLines: activeFormation.showGridLines !== false,
@@ -1180,28 +1259,35 @@ export default function App() {
       }
 
       // 2. DBからハードデリート
-      const res = await fetch(`/api/formations/${id}`, {
-        method: "DELETE",
-      });
-
-      if (res.ok) {
-        if (activeFormation && activeFormation.id === id) {
-          setActiveFormation(null);
-          setSelectedSetId(null);
-          setActiveView("home");
-        }
-        
-        // 元のローカルストレージキーのクリーンアップ
-        localStorage.removeItem(`drillflow_formation_style_${id}`);
-        localStorage.removeItem(`drillflow_set_instructions_${id}`);
-        localStorage.removeItem(`drillflow_member_variables_${id}`);
-        localStorage.removeItem(`drillflow_member_labels_${id}`);
-        localStorage.removeItem(`drillflow_member_groups_${id}`);
-
-        fetchFormations();
-        setSuccessMessage(`「${deleteTargetTitle}」をごみ箱に移動しました`);
-        setTimeout(() => setSuccessMessage(""), 4500);
+      try {
+        await fetch(`/api/formations/${id}`, {
+          method: "DELETE",
+        });
+      } catch (err) {
+        console.error("Failed to delete formation via API:", err);
       }
+
+      const updatedFormations = formations.filter((item) => item.id !== id);
+      setFormations(updatedFormations);
+      localStorage.setItem("drillflow_local_formations", JSON.stringify(updatedFormations));
+
+      if (activeFormation && activeFormation.id === id) {
+        setActiveFormation(null);
+        setSelectedSetId(null);
+        setActiveView("home");
+      }
+
+      // 元のローカルストレージキーのクリーンアップ
+      localStorage.removeItem(`drillflow_formation_${id}`);
+      localStorage.removeItem(`drillflow_formation_style_${id}`);
+      localStorage.removeItem(`drillflow_set_instructions_${id}`);
+      localStorage.removeItem(`drillflow_member_variables_${id}`);
+      localStorage.removeItem(`drillflow_member_labels_${id}`);
+      localStorage.removeItem(`drillflow_member_groups_${id}`);
+
+      fetchFormations();
+      setSuccessMessage(`「${deleteTargetTitle || "コマ表"}」をごみ箱に移動しました`);
+      setTimeout(() => setSuccessMessage(""), 4500);
     } catch (error) {
       console.error("Failed to delete formation:", error);
     } finally {
@@ -1444,6 +1530,13 @@ export default function App() {
     }
 
     if (newSet) {
+      if (setId) {
+        const sourceGroups = memberGroupsBySet[setId] || [];
+        setMemberGroupsBySet((prev) => ({
+          ...prev,
+          [newSet!.id]: JSON.parse(JSON.stringify(sourceGroups)),
+        }));
+      }
       const updatedSets = [...activeFormation.sets.filter((s) => s.id !== newSet!.id), newSet].sort(
         (a, b) => a.number - b.number
       );
@@ -1496,7 +1589,8 @@ export default function App() {
   // API: 部員追加
   const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMemberName) return;
+    const finalDisplayLabel = newMemberLabel.trim() || generateNextMemberLabel(newMemberInstrument, members, memberCustomLabels);
+    const finalName = newMemberName.trim();
 
     let createdMember: Member | null = null;
     try {
@@ -1504,9 +1598,10 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: newMemberName,
+          name: finalName,
           instrument: newMemberInstrument,
           color: newMemberColor,
+          label: finalDisplayLabel,
           formationId: activeFormation ? activeFormation.id : undefined,
         }),
       });
@@ -1518,65 +1613,83 @@ export default function App() {
       console.error("Failed to create member via API:", error);
     }
 
-    if (!createdMember) {
-      createdMember = {
-        id: Date.now(),
-        name: newMemberName,
-        instrument: newMemberInstrument,
-        color: newMemberColor,
-      };
-      const updatedMembers = [...members, createdMember];
-      setMembers(updatedMembers);
-      localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
+    const newM: Member = createdMember ? {
+      ...createdMember,
+      name: finalName,
+      label: finalDisplayLabel,
+    } : {
+      id: members.length > 0 ? Math.max(...members.map((m) => Number(m.id) || 0)) + 1 : 1,
+      name: finalName,
+      instrument: newMemberInstrument,
+      color: newMemberColor,
+      label: finalDisplayLabel,
+    };
 
-      if (activeFormation) {
-        const updatedSets = activeFormation.sets.map((s) => ({
+    const updatedMembers = [...members.filter((m) => String(m.id) !== String(newM.id)), newM];
+    setMembers(updatedMembers);
+    localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
+
+    setMemberCustomLabels((prev) => ({
+      ...prev,
+      [newM.id]: finalDisplayLabel,
+    }));
+
+    if (activeFormation) {
+      const updatedSets = activeFormation.sets.map((s) => {
+        const exists = s.positions.some((p) => String(p.memberId) === String(newM.id));
+        if (exists) return s;
+        return {
           ...s,
           positions: [
             ...s.positions,
-            { memberId: createdMember!.id, setId: s.id, x: 0.5, y: 0.5 },
+            { memberId: newM.id, setId: s.id, x: 0.5, y: 0.5 },
           ],
-        }));
-        const updatedFormation = { ...activeFormation, sets: updatedSets };
-        setActiveFormation(updatedFormation);
-        localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
-      }
-    } else {
-      if (activeFormation) {
-        loadFormation(activeFormation.id);
-      } else {
-        fetchMembers();
-      }
+        };
+      });
+      const updatedFormation = { ...activeFormation, sets: updatedSets };
+      setActiveFormation(updatedFormation);
+      localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
     }
 
     setNewMemberName("");
+    setNewMemberLabel("");
     setShowNewMemberModal(false);
   };
 
   // API: 部員編集
   const handleSaveEditMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingMember || !editMemberName) return;
+    if (!editingMember) return;
 
-    const updatedMember = {
+    const finalLabel = editMemberLabel.trim() || generateNextMemberLabel(editMemberInstrument, members, memberCustomLabels);
+    const finalName = editMemberName.trim();
+
+    const updatedMember: Member = {
       ...editingMember,
-      name: editMemberName,
+      name: finalName,
       instrument: editMemberInstrument,
       color: editMemberColor,
+      label: finalLabel,
     };
 
     const updatedMembers = members.map((m) => (m.id === editingMember.id ? updatedMember : m));
     setMembers(updatedMembers);
     localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
 
+    setMemberCustomLabels((prev) => ({
+      ...prev,
+      [editingMember.id]: finalLabel,
+    }));
+
     try {
       await fetch(`/api/members/${editingMember.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: editMemberName,
+          name: finalName,
           instrument: editMemberInstrument,
           color: editMemberColor,
+          label: finalLabel,
         }),
       });
     } catch (error) {
@@ -1587,23 +1700,33 @@ export default function App() {
   };
 
   // API: 部員削除
-  const handleDeleteMember = async (memberId: number) => {
-    if (!window.confirm("この部員を完全に削除しますか？（すべてのNo.の位置情報も削除されます）")) return;
-
-    const updatedMembers = members.filter((m) => m.id !== memberId);
+  const handleDeleteMember = async (memberId: number | string) => {
+    const updatedMembers = members.filter((m) => String(m.id) !== String(memberId));
     setMembers(updatedMembers);
     localStorage.setItem("drillflow_local_members", JSON.stringify(updatedMembers));
 
-    if (selectedMemberId === memberId) {
+    if (selectedMemberId && String(selectedMemberId) === String(memberId)) {
       setSelectedMemberId(null);
     }
 
+    if (editingMember && String(editingMember.id) === String(memberId)) {
+      setEditingMember(null);
+    }
+
+    setMemberCustomLabels((prev) => {
+      const next = { ...prev };
+      delete next[memberId as any];
+      delete next[String(memberId) as any];
+      return next;
+    });
+
+    let updatedFormation = activeFormation;
     if (activeFormation) {
       const updatedSets = activeFormation.sets.map((s) => ({
         ...s,
-        positions: s.positions.filter((p) => p.memberId !== memberId),
+        positions: s.positions.filter((p) => String(p.memberId) !== String(memberId)),
       }));
-      const updatedFormation = { ...activeFormation, sets: updatedSets };
+      updatedFormation = { ...activeFormation, sets: updatedSets };
       setActiveFormation(updatedFormation);
       localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
     }
@@ -1614,6 +1737,70 @@ export default function App() {
       });
     } catch (error) {
       console.error("Failed to delete member via API:", error);
+    }
+
+    if (updatedFormation) {
+      try {
+        await fetch(`/api/formations/${updatedFormation.id}/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: updatedFormation.title,
+            music: updatedFormation.music,
+            bpm: updatedFormation.bpm,
+            fieldWidth: updatedFormation.fieldWidth || 150,
+            fieldHeight: updatedFormation.fieldHeight || 150,
+            markingShape: updatedFormation.markingShape || "cross",
+            markingIntervalX: updatedFormation.markingIntervalX || 10,
+            markingIntervalY: updatedFormation.markingIntervalY || 10,
+            markingCountX: updatedFormation.markingCountX || 15,
+            markingCountY: updatedFormation.markingCountY || 15,
+            backgroundColor: updatedFormation.backgroundColor || "#ffffff",
+            markerColor: updatedFormation.markerColor || "#000000",
+            showYardLines: updatedFormation.showYardLines !== false,
+            showYardNumbers: updatedFormation.showYardNumbers !== false,
+            showGridLines: updatedFormation.showGridLines !== false,
+            customMarkers: updatedFormation.customMarkers || [],
+            sets: updatedFormation.sets,
+            members: updatedMembers,
+            memberGroupsBySet: memberGroupsBySet,
+          }),
+        });
+      } catch (e) {
+        console.error("Failed to save formation after member deletion:", e);
+      }
+    }
+
+    setSuccessMessage("部員を削除しました");
+    setTimeout(() => setSuccessMessage(""), 3000);
+  };
+
+  // API: 部員一括削除
+  const handleDeleteAllMembers = async () => {
+    if (!window.confirm("登録されているすべての部員を削除しますか？この操作は取り消せません。")) return;
+
+    setMembers([]);
+    setSelectedMemberId(null);
+    setEditingMember(null);
+    setMemberCustomLabels({});
+    localStorage.setItem("drillflow_local_members", JSON.stringify([]));
+
+    if (activeFormation) {
+      const updatedSets = activeFormation.sets.map((s) => ({
+        ...s,
+        positions: [],
+      }));
+      const updatedFormation = { ...activeFormation, sets: updatedSets };
+      setActiveFormation(updatedFormation);
+      localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
+    }
+
+    try {
+      await fetch("/api/members/all", {
+        method: "DELETE",
+      });
+    } catch (error) {
+      console.error("Failed to delete all members via API:", error);
     }
   };
 
@@ -1682,17 +1869,42 @@ export default function App() {
   const prevSet = getPrevSet();
   const nextSet = getNextSet();
 
+  // 複数メンバーのポジション更新
+  const handleUpdatePositions = (updates: { memberId: number; x: number; y: number }[]) => {
+    if (!activeFormation || !selectedSetId || updates.length === 0) return;
+
+    const updatedSets = activeFormation.sets.map((s) => {
+      if (s.id !== selectedSetId) return s;
+
+      const updatedPositions = [...s.positions];
+      updates.forEach((u) => {
+        const idx = updatedPositions.findIndex((p) => p.memberId === u.memberId);
+        if (idx > -1) {
+          updatedPositions[idx] = { ...updatedPositions[idx], x: u.x, y: u.y };
+        } else {
+          updatedPositions.push({ memberId: u.memberId, setId: selectedSetId, x: u.x, y: u.y });
+        }
+      });
+
+      return { ...s, positions: updatedPositions };
+    });
+
+    const updatedFormation = { ...activeFormation, sets: updatedSets };
+    setActiveFormation(updatedFormation);
+    setIsDirty(true);
+  };
+
   // --- Undo (元に戻す ↩) & Redo (やり直す ↪) 履歴ロジック ---
   const saveEditorHistory = () => {
     if (activeFormation) {
-      setEditorHistory((prev) => [...prev.slice(-20), JSON.parse(JSON.stringify(activeFormation))]);
+      setEditorHistory((prev) => [...prev.slice(-50), JSON.parse(JSON.stringify(activeFormation))]);
       setEditorFuture([]);
     }
   };
 
   const saveDesignerHistory = () => {
     setDesignerHistory((prev) => [
-      ...prev.slice(-20),
+      ...prev.slice(-50),
       {
         designerName,
         designerBlocksX,
@@ -1808,28 +2020,215 @@ export default function App() {
     }
   };
 
+  const handleCopyMarker = () => {
+    if (!selectedDesignerMarkerId) return false;
+    let targetMarker: CustomMarker | undefined;
+    if (activeView === "field_designer") {
+      targetMarker = designerCustomMarkers.find((m) => m.id === selectedDesignerMarkerId);
+    } else if (activeFormation) {
+      targetMarker = (activeFormation.customMarkers || []).find((m) => m.id === selectedDesignerMarkerId);
+    }
+
+    if (targetMarker) {
+      setCopiedMarker({ ...targetMarker });
+      setSaveStatus("マーカーをコピーしました 📋");
+      setTimeout(() => setSaveStatus(""), 2000);
+      return true;
+    }
+    return false;
+  };
+
+  const handlePasteMarker = () => {
+    if (!copiedMarker) return false;
+
+    if (activeView === "field_designer") {
+      if (designerCustomMarkers.length >= 50) {
+        alert("マーカーは最大50個まで配置可能です。");
+        return false;
+      }
+      saveDesignerHistory();
+      const offsetX = 0.03;
+      const offsetY = 0.03;
+      const newX = Math.min(0.98, copiedMarker.x + offsetX);
+      const newY = Math.min(0.98, copiedMarker.y + offsetY);
+
+      const newMarker: CustomMarker = {
+        ...copiedMarker,
+        id: `custom-marker-${Date.now()}`,
+        x: newX,
+        y: newY,
+      };
+
+      setDesignerCustomMarkers((prev) => [...prev, newMarker]);
+      setSelectedDesignerMarkerId(newMarker.id);
+      setCopiedMarker(newMarker);
+      setSaveStatus("マーカーを貼り付けました 📋");
+      setTimeout(() => setSaveStatus(""), 2000);
+      return true;
+    } else if (activeFormation) {
+      const currentMarkers = activeFormation.customMarkers || [];
+      if (currentMarkers.length >= 50) {
+        alert("マーカーは最大50個まで配置可能です。");
+        return false;
+      }
+      saveEditorHistory();
+      const offsetX = 0.03;
+      const offsetY = 0.03;
+      const newX = Math.min(0.98, copiedMarker.x + offsetX);
+      const newY = Math.min(0.98, copiedMarker.y + offsetY);
+
+      const newMarker: CustomMarker = {
+        ...copiedMarker,
+        id: `custom-marker-${Date.now()}`,
+        x: newX,
+        y: newY,
+      };
+
+      const updatedMarkers = [...currentMarkers, newMarker];
+      setActiveFormation({
+        ...activeFormation,
+        customMarkers: updatedMarkers,
+      });
+      setSelectedDesignerMarkerId(newMarker.id);
+      setCopiedMarker(newMarker);
+      setSaveStatus("マーカーを貼り付けました 📋");
+      setTimeout(() => setSaveStatus(""), 2000);
+      return true;
+    }
+    return false;
+  };
+
+  const handleDeleteSelectedMarker = () => {
+    if (!selectedDesignerMarkerId) return false;
+    if (activeView === "field_designer") {
+      saveDesignerHistory();
+      setDesignerCustomMarkers((prev) => prev.filter((m) => m.id !== selectedDesignerMarkerId));
+      setSelectedDesignerMarkerId(null);
+      setSaveStatus("マーカーを削除しました 🗑️");
+      setTimeout(() => setSaveStatus(""), 2000);
+      return true;
+    } else if (activeFormation) {
+      const currentMarkers = activeFormation.customMarkers || [];
+      if (currentMarkers.some((m) => m.id === selectedDesignerMarkerId)) {
+        saveEditorHistory();
+        setActiveFormation({
+          ...activeFormation,
+          customMarkers: currentMarkers.filter((m) => m.id !== selectedDesignerMarkerId),
+        });
+        setSelectedDesignerMarkerId(null);
+        setSaveStatus("マーカーを削除しました 🗑️");
+        setTimeout(() => setSaveStatus(""), 2000);
+        return true;
+      }
+    }
+    return false;
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeTag = document.activeElement?.tagName.toLowerCase();
-      if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") {
+      // Ctrl+S / Cmd+S はどの要素にフォーカスがあっても保存処理
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (activeView === "editor" && activeFormation) {
+          handleSaveFormation();
+        } else if (activeView === "field_designer") {
+          handleSaveFieldTemplate();
+        }
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          handleRedo();
-        } else {
-          handleUndo();
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      const isInput = activeTag === "input" || activeTag === "textarea" || activeTag === "select";
+
+      // Escapeキー (モーダル閉じ・選択解除)
+      if (e.key === "Escape") {
+        if (showShortcutsModal) { setShowShortcutsModal(false); return; }
+        if (showNewFormationModal) { setShowNewFormationModal(false); return; }
+        if (showNewMemberModal) { setShowNewMemberModal(false); return; }
+        if (showFormationSettingsModal) { setShowFormationSettingsModal(false); return; }
+        if (selectedDesignerMarkerId) {
+          setSelectedDesignerMarkerId(null);
+          return;
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        if (selectedMemberIds.length > 0 || selectedMemberId !== null) {
+          setSelectedMemberIds([]);
+          setSelectedMemberId(null);
+          return;
+        }
+      }
+
+      if (isInput) return;
+
+      // Ctrl / Cmd 組み合わせ
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key === "c" && selectedDesignerMarkerId) {
+          e.preventDefault();
+          handleCopyMarker();
+          return;
+        } else if (key === "v" && copiedMarker) {
+          e.preventDefault();
+          handlePasteMarker();
+          return;
+        } else if (key === "z") {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+        } else if (key === "y") {
+          e.preventDefault();
+          handleRedo();
+        } else if (key === "a") {
+          e.preventDefault();
+          if (activeView === "editor" && members.length > 0) {
+            setSelectedMemberIds(members.map((m) => m.id));
+          }
+        }
+        return;
+      }
+
+      // 単音キーショートカット
+      if (e.code === "Space") {
         e.preventDefault();
-        handleRedo();
+        setIsPlaying((prev) => !prev);
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedDesignerMarkerId) {
+          e.preventDefault();
+          handleDeleteSelectedMarker();
+        }
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        if (prevSet) {
+          setSelectedSetId(prevSet.id);
+          setCurrentCount(0);
+        }
+      } else if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        if (nextSet) {
+          setSelectedSetId(nextSet.id);
+          setCurrentCount(0);
+        }
+      } else if (e.key === "g" || e.key === "G") {
+        e.preventDefault();
+        setSnapToGrid((prev) => !prev);
+        setSnapMode((prev) => (prev === "none" ? "on" : "none"));
+      } else if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+        e.preventDefault();
+        setShowShortcutsModal((prev) => !prev);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editorHistory, editorFuture, designerHistory, designerFuture, activeView, activeFormation, designerName, designerBlocksX, designerBlocksY, designerSubdivisionsX, designerSubdivisionsY, designerMarkingShape, designerBackgroundColor, designerGridLineStyle, designerSubGridLineStyle, designerGridLineColor, designerMarkerColor, designerCustomMarkers, snapToGrid]);
+  }, [
+    editorHistory, editorFuture, designerHistory, designerFuture, activeView, activeFormation,
+    designerName, designerBlocksX, designerBlocksY, designerSubdivisionsX, designerSubdivisionsY,
+    designerMarkingShape, designerBackgroundColor, designerGridLineStyle, designerSubGridLineStyle,
+    designerGridLineColor, designerMarkerColor, designerCustomMarkers, snapToGrid,
+    showShortcutsModal, showNewFormationModal, showNewMemberModal, showFormationSettingsModal,
+    selectedMemberIds, selectedMemberId, selectedDesignerMarkerId, copiedMarker, prevSet, nextSet, members, selectedSetId, isPlaying
+  ]);
 
   // アニメーションループ (BPM考慮)
   const animate = (timestamp: number) => {
@@ -2181,9 +2580,10 @@ export default function App() {
             // 全員の指定 (all instructions for top section under No. and cts.)
             const allInsts = setInsts.filter((inst) => inst.targetType === "all");
 
-            // 個人の指定 (individual member instructions for bottom section)
+            // 個人の指定 (individual member / group / instrument instructions for bottom section)
             let individualInsts: SetInstruction[] = [];
             if (selMember) {
+              const setGrps = memberGroupsBySet[set.id] || [];
               individualInsts = setInsts.filter((inst) => {
                 if (inst.targetType === "individual") {
                   const vals = inst.targetValue
@@ -2193,6 +2593,10 @@ export default function App() {
                     vals.includes(String(selMember.id)) ||
                     vals.includes(selMember.name.toLowerCase())
                   );
+                }
+                if (inst.targetType === "group") {
+                  const grp = setGrps.find((g) => g.id === inst.targetValue || g.name === inst.targetValue);
+                  return grp ? grp.memberIds.includes(selMember.id) : false;
                 }
                 if (inst.targetType === "instrument") {
                   return (
@@ -2239,7 +2643,7 @@ export default function App() {
                 {/* 2. MIDDLE/LOWER SECTION: Field map (コマ表) - shifted towards bottom */}
                 <div className="flex-1 mt-1 mb-2 flex items-end justify-center w-full overflow-hidden">
                   <div
-                    className="relative rounded-none border-2 border-black overflow-hidden marching-canvas-print select-none"
+                    className="relative rounded-none overflow-hidden marching-canvas-print select-none"
                     style={{
                       aspectRatio: `${activeFormation.fieldWidth || 150}/${activeFormation.fieldHeight || 150}`,
                       width: "100%",
@@ -2269,7 +2673,7 @@ export default function App() {
                       const subY = activeFormation.subdivisionsY ?? 10;
                       const totalX = bX * subX;
                       const totalY = bY * subY;
-                      const gColor = activeFormation.gridLineColor || "rgba(0,0,0,0.15)";
+                      const gColor = activeFormation.gridLineColor || (activeFormation.backgroundColor?.startsWith("#1e") ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.2)");
                       const gWidth = activeFormation.gridLineWidth || 1;
                       const gStyle = activeFormation.gridLineStyle || "solid";
                       const subGStyle = activeFormation.subGridLineStyle || "dashed";
@@ -2293,9 +2697,10 @@ export default function App() {
                                 x2={xVal}
                                 y2={totalY * 10}
                                 stroke={gColor}
-                                strokeWidth={isMajor ? Math.max(1, gWidth * 1.5) : Math.max(0.5, gWidth * 0.6)}
+                                strokeWidth={isMajor ? Math.max(1.5, gWidth * 1.5) : Math.max(0.8, gWidth * 0.8)}
                                 strokeDasharray={isMajor ? mainDash : subDash}
-                                opacity={isMajor ? 1.0 : 0.45}
+                                opacity={isMajor ? 1.0 : 0.5}
+                                vectorEffect="non-scaling-stroke"
                               />
                             );
                           })}
@@ -2310,9 +2715,10 @@ export default function App() {
                                 x2={totalX * 10}
                                 y2={yVal}
                                 stroke={gColor}
-                                strokeWidth={isMajor ? Math.max(1, gWidth * 1.5) : Math.max(0.5, gWidth * 0.6)}
+                                strokeWidth={isMajor ? Math.max(1.5, gWidth * 1.5) : Math.max(0.8, gWidth * 0.8)}
                                 strokeDasharray={isMajor ? mainDash : subDash}
-                                opacity={isMajor ? 1.0 : 0.45}
+                                opacity={isMajor ? 1.0 : 0.5}
+                                vectorEffect="non-scaling-stroke"
                               />
                             );
                           })}
@@ -2323,7 +2729,7 @@ export default function App() {
                     {/* Custom markers */}
                     {(activeFormation.customMarkers || []).map((mark, idx) => {
                       const shapeToRender = mark.shape || activeFormation.markingShape || "cross";
-                      const colorToUse = mark.color || activeFormation.markerColor || "#000000";
+                      const colorToUse = mark.color || activeFormation.markerColor || "rgba(0,0,0,0.7)";
                       const mSize = activeFormation.markerSize || 24;
                       return (
                         <div
@@ -2331,7 +2737,7 @@ export default function App() {
                           className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center justify-center z-10"
                           style={{
                             left: `${mark.x * 100}%`,
-                            top: `${mark.y * 100}%`,
+                            top: `${(1 - mark.y) * 100}%`,
                             width: `${mSize * 0.7}px`,
                             height: `${mSize * 0.7}px`,
                           }}
@@ -2339,11 +2745,16 @@ export default function App() {
                           <svg viewBox="-12 -12 24 24" className="w-full h-full overflow-visible">
                             {renderCustomMarkShape(shapeToRender, colorToUse, "#000000")}
                           </svg>
+                          {mark.label && (
+                            <span className="absolute -bottom-3 text-[8px] font-sans font-black text-slate-900 bg-white/90 px-1 rounded scale-90 border border-slate-300 select-none pointer-events-none whitespace-nowrap shadow-xs">
+                              {mark.label}
+                            </span>
+                          )}
                         </div>
                       );
                     })}
 
-                    {/* Draw member dots (Solid Black Dots with Upside-Down Member Name Text Above) */}
+                    {/* Draw member positions in print view */}
                     {members.map((m) => {
                       const curPos = set.positions.find((p) => p.memberId === m.id);
                       const nextPos = nextSetObj?.positions.find((p) => p.memberId === m.id);
@@ -2354,29 +2765,34 @@ export default function App() {
                       const y2 = nextPos ? nextPos.y : y1;
 
                       const isSelected = selectedMemberId === m.id;
+                      const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
 
                       return (
                         <React.Fragment key={m.id}>
-                          {/* Member dot container with upside-down name label above */}
+                          {/* Member position dot and display name on print canvas */}
                           <div
                             className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center pointer-events-none z-20"
                             style={{
                               left: `${x1 * 100}%`,
-                              top: `${y1 * 100}%`,
+                              top: `${(1 - y1) * 100}%`,
                             }}
                           >
-                            {/* Member label above dot (upside-down for dotbook view) */}
-                            <span className="rotate-180 text-xs font-bold leading-none text-black whitespace-nowrap mb-0.5 select-none">
-                              {m.name}
-                            </span>
-                            {/* Solid black dot */}
                             <div
-                              className={`rounded-full flex items-center justify-center font-bold text-white shadow-xs ${
-                                isSelected ? "w-3.5 h-3.5 ring-2 ring-blue-600 z-50 scale-110" : "w-2.5 h-2.5"
+                              className={`rounded-full ${
+                                isSelected ? "w-2.5 h-2.5 bg-blue-600 ring-2 ring-blue-600 z-50" : "w-2 h-2"
                               }`}
-                              style={{ backgroundColor: "#000000" }}
-                              title={m.name}
+                              style={{ backgroundColor: m.color || "#000000" }}
+                              title={mLabel}
                             />
+                            {showMemberLabels && (
+                              <span
+                                className={`absolute top-full left-1/2 -translate-x-1/2 text-[9px] font-mono font-bold leading-none text-black whitespace-nowrap select-none -mt-0.5 ${
+                                  isSelected ? "font-extrabold text-blue-700 underline" : ""
+                                }`}
+                              >
+                                {mLabel}
+                              </span>
+                            )}
                           </div>
 
                           {/* Arrow to next set position for selected member */}
@@ -2397,9 +2813,9 @@ export default function App() {
                               </defs>
                               <line
                                 x1={`${x1 * 100}%`}
-                                y1={`${y1 * 100}%`}
+                                y1={`${(1 - y1) * 100}%`}
                                 x2={`${x2 * 100}%`}
-                                y2={`${y2 * 100}%`}
+                                y2={`${(1 - y2) * 100}%`}
                                 stroke="#2563eb"
                                 strokeWidth={2.8}
                                 markerEnd={`url(#arrow-print-${set.id}-${m.id})`}
@@ -2442,111 +2858,159 @@ export default function App() {
   return (
     <div className="min-h-screen md:h-screen bg-slate-100 text-slate-800 font-sans flex flex-col selection:bg-blue-600 selection:text-white md:overflow-hidden">
       {/* 上部ナビゲーション / ヘッダー (Professional Polish Theme) */}
-      <header className="h-16 bg-slate-900 text-white flex items-center justify-between px-6 border-b border-slate-700 shrink-0 z-40">
+      <header className="h-16 bg-slate-900 text-white flex items-center justify-between px-4 sm:px-6 border-b border-slate-800 shrink-0 z-40 select-none">
         {/* 左側: アプリタイトル & コマ表切り替え */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={() => {
               setActiveView("home");
               setActiveFormation(null);
             }}
-            className="p-2 bg-slate-800/80 hover:bg-slate-700 rounded-lg border border-slate-700/50 transition flex items-center justify-center"
+            className="h-9 w-9 bg-slate-800/90 hover:bg-slate-700 rounded-xl border border-slate-700/70 transition-all flex items-center justify-center text-slate-300 hover:text-white shadow-xs"
             title="ホームに戻る"
           >
-            <Home className="w-5 h-5 text-white" />
+            <Home className="w-4 h-4" />
           </button>
 
           {activeView === "editor" && formations.length > 0 && (
             <>
-              <div className="h-6 w-[1px] bg-slate-700 hidden md:block" />
+              <div className="h-5 w-px bg-slate-800 hidden md:block" />
               {/* コマ表選択プルダウン (長体省略対応) */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <select
-                  className="bg-slate-800 border border-slate-700 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-white font-medium max-w-[120px] sm:max-w-[180px] md:max-w-[220px] truncate"
+                  className="h-9 bg-slate-800/90 border border-slate-700/70 text-xs rounded-xl px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white font-medium max-w-[120px] sm:max-w-[170px] md:max-w-[210px] truncate shadow-xs cursor-pointer"
                   value={activeFormation?.id || ""}
                   onChange={(e) => {
                     if (e.target.value) loadFormation(parseInt(e.target.value));
                   }}
                 >
-                  {formations.map((f) => (
-                    <option key={f.id} value={f.id} className="truncate">
-                      {f.title}
-                    </option>
-                  ))}
+                  {formations.map((f) => {
+                    const displayTitle = f.title.length > 8 ? `${f.title.slice(0, 7)}...` : f.title;
+                    return (
+                      <option key={f.id} value={f.id} className="truncate" title={f.title}>
+                        {displayTitle}
+                      </option>
+                    );
+                  })}
                 </select>
 
                 <button
                   onClick={() => setShowNewFormationModal(true)}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 rounded border border-slate-700 transition shrink-0"
+                  className="h-9 w-9 bg-slate-800/90 hover:bg-slate-700 text-blue-400 hover:text-blue-300 rounded-xl border border-slate-700/70 transition flex items-center justify-center shrink-0 shadow-xs"
                   title="新しいコマ表を作成"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                 </button>
               </div>
             </>
           )}
         </div>
 
-        {/* 再生コントロール & 保存/ゴースト切り替え */}
+        {/* 再生コントロール & 各種ツールボタン */}
         {activeView === "editor" && activeFormation ? (
-          <div className="flex items-center gap-2 md:gap-3 flex-nowrap overflow-x-auto py-1">
-            {/* 再生コントロール */}
-            <div className="flex items-center bg-slate-800 px-2.5 py-1 rounded-full border border-slate-700 gap-1 shadow-inner shrink-0">
+          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto py-1.5 px-1 scrollbar-none">
+            {/* 再生コントロール & シークスライダー ピル */}
+            <div className="h-9 flex items-center bg-slate-800/90 pl-1.5 pr-2 rounded-xl border border-slate-700/80 gap-1 shadow-xs shrink-0">
+              {/* 再生/ストップ 統合ボタン */}
               <button
-                onClick={handlePlayToggle}
-                className={`p-1 rounded-full transition ${
+                onClick={isPlaying ? handleStop : handlePlayToggle}
+                className={`w-7 h-7 rounded-lg transition flex items-center justify-center ${
                   isPlaying
-                    ? "text-blue-400 bg-blue-400/10"
-                    : "text-slate-300 hover:text-blue-400"
+                    ? "text-blue-400 bg-blue-500/20 hover:bg-blue-500/30"
+                    : "text-slate-300 hover:text-white hover:bg-slate-700/70"
                 }`}
-                title={isPlaying ? "一時停止" : "再生"}
+                title={isPlaying ? "ストップ" : "再生"}
               >
-                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                onClick={handleStop}
-                className="p-1 rounded-full text-slate-400 hover:text-blue-400 transition"
-                title="ストップ"
-              >
-                <Square className="w-3.5 h-3.5" />
+                {isPlaying ? (
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                ) : (
+                  <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                )}
               </button>
 
-              <div className="h-4 w-[1px] bg-slate-700 mx-0.5" />
+              <div className="h-3.5 w-px bg-slate-700/80 my-auto" />
 
-              {/* 再生カウントインジケーター / シークバー */}
-              <div className="flex items-center gap-1.5 px-0.5">
-                <span className="text-[10px] font-mono text-slate-400 w-10 text-right">
-                  {isPlaying
-                    ? `${Math.floor(currentCount)}/${currentSet?.counts}`
-                    : `No. ${currentSet?.number}`}
-                </span>
+              {/* カウント・No.表示 & シークスライダー */}
+              <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-slate-200">
+                {isPlaying ? (
+                  <span className="text-blue-400 shrink-0 w-[34px] text-right tabular-nums">
+                    {Math.min(currentSet?.counts || 16, Math.floor(currentCount) + 1)}/{currentSet?.counts || 16}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-slate-300 w-[34px] text-right tabular-nums">
+                    No.{currentSet?.number || 1}
+                  </span>
+                )}
+
                 <input
                   type="range"
                   min="0"
                   max={currentSet?.counts || 16}
                   step="0.1"
-                  disabled={!nextSet}
+                  disabled={!nextSet && !isPlaying}
                   value={isPlaying ? currentCount : 0}
                   onChange={(e) => {
-                    if (!isPlaying) setIsPlaying(true);
-                    setCurrentCount(parseFloat(e.target.value));
+                    const val = parseFloat(e.target.value);
+                    setCurrentCount(val);
+                    if (!isPlaying) {
+                      setIsPlaying(true);
+                    }
                   }}
-                  className="w-14 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  className="w-14 sm:w-16 md:w-20 h-1.5 bg-slate-700/80 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition shrink-0 ml-0.5"
+                  title="再生シークスライダー"
                 />
               </div>
             </div>
 
-            {/* ゴースト表示切り替え */}
+            {/* コマ表上の部員名表示切り替え */}
             <button
-              onClick={() => setShowGhost(!showGhost)}
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white rounded transition shrink-0"
-              title="次の位置を重ねて表示します"
+              type="button"
+              onClick={() => setShowMemberLabels(!showMemberLabels)}
+              className={`h-9 px-2.5 border text-xs rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs ${
+                showMemberLabels
+                  ? "bg-blue-600/20 border-blue-500/80 text-blue-300"
+                  : "bg-slate-800/90 border-slate-700/80 text-slate-400 hover:text-white"
+              }`}
+              title="コマ表上の部員名表示（オン/オフ）を切り替えます"
             >
-              <div className={`w-7 h-3.5 rounded-full relative transition-colors shrink-0 ${showGhost ? 'bg-blue-600' : 'bg-slate-600'}`}>
-                <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-all ${showGhost ? 'right-0.5' : 'left-0.5'}`} />
-              </div>
-              <span className="text-[10px]">Ghost</span>
+              <User className="w-3.5 h-3.5" />
+              <span className="text-[11px]">部員名: {showMemberLabels ? "表示" : "非表示"}</span>
             </button>
+
+            {/* スナップ切り替え */}
+            <div className="h-9 flex items-center bg-slate-800/90 border border-slate-700/80 rounded-xl overflow-hidden p-0.5 text-xs font-bold shrink-0 shadow-xs">
+              <span className="px-2 text-slate-400 text-[10.5px] hidden xl:inline">スナップ:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSnapToGrid(false);
+                  setSnapMode("none");
+                }}
+                className={`h-full px-2 rounded-lg text-[10.5px] transition flex items-center ${
+                  !snapToGrid || snapMode === "none"
+                    ? "bg-slate-700 text-white font-black"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+                title="スナップオフ (0.05刻みで移動)"
+              >
+                オフ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSnapToGrid(true);
+                  setSnapMode("on");
+                }}
+                className={`h-full px-2 rounded-lg text-[10.5px] transition flex items-center ${
+                  snapToGrid && snapMode !== "none"
+                    ? "bg-blue-600 text-white font-black shadow-xs"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+                title="スナップオン (ブロック交点・中点スナップ)"
+              >
+                オン
+              </button>
+            </div>
 
             {/* 整列配置 */}
             <button
@@ -2560,80 +3024,103 @@ export default function App() {
                 }
                 setIsAlignToolActive(!isAlignToolActive);
               }}
-              className={`px-2.5 py-1.5 rounded text-xs font-bold transition flex items-center gap-1 shadow border shrink-0 ${
+              className={`h-9 px-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border shrink-0 shadow-xs ${
                 isAlignToolActive
-                  ? "bg-blue-600 text-white hover:bg-blue-500 border-blue-700"
-                  : "bg-slate-800 text-blue-400 hover:text-white border-slate-700"
+                  ? "bg-blue-600 text-white hover:bg-blue-500 border-blue-500"
+                  : "bg-slate-800/90 text-blue-400 hover:text-white border-slate-700/80"
               }`}
               title="部員を等間隔で直線や円弧上に配置します"
             >
               <Layout className="w-3.5 h-3.5" />
-              <span>整列配置</span>
+              <span className="text-[11px]">整列配置</span>
             </button>
 
-            {/* 元に戻す (Undo ↩) */}
+            {/* ゴースト表示切り替え */}
             <button
-              onClick={handleUndo}
-              disabled={editorHistory.length === 0}
-              className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 rounded text-xs font-bold text-white transition flex items-center justify-center shadow shrink-0"
-              title="元に戻す (Ctrl+Z)"
+              onClick={() => setShowGhost(!showGhost)}
+              className={`h-9 px-2.5 border text-xs rounded-xl font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs hidden xl:flex ${
+                showGhost
+                  ? "bg-blue-600/20 border-blue-500/80 text-blue-300"
+                  : "bg-slate-800/90 border-slate-700/80 text-slate-400 hover:text-white"
+              }`}
+              title="次の位置を重ねて表示します"
             >
-              <span className="text-amber-400 font-black text-base leading-none">↩</span>
+              <div className={`w-6 h-3 rounded-full relative transition-colors shrink-0 ${showGhost ? 'bg-blue-500' : 'bg-slate-600'}`}>
+                <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-all ${showGhost ? 'right-0.5' : 'left-0.5'}`} />
+              </div>
+              <span className="text-[11px]">Ghost</span>
             </button>
 
-            {/* やり直す (Redo ↪) */}
-            <button
-              onClick={handleRedo}
-              disabled={editorFuture.length === 0}
-              className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 rounded text-xs font-bold text-white transition flex items-center justify-center shadow shrink-0"
-              title="やり直す (Ctrl+Y / Ctrl+Shift+Z)"
-            >
-              <span className="text-amber-400 font-black text-base leading-none">↪</span>
-            </button>
+            {/* Undo / Redo グループ */}
+            <div className="h-9 flex items-center bg-slate-800/90 border border-slate-700/80 rounded-xl p-0.5 shrink-0 shadow-xs">
+              <button
+                onClick={handleUndo}
+                disabled={editorHistory.length === 0}
+                className="h-full px-2 hover:bg-slate-700/70 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg text-xs font-bold text-slate-300 hover:text-white transition flex items-center justify-center"
+                title="元に戻す (Ctrl+Z)"
+              >
+                <span className="text-amber-400 font-black text-sm leading-none">↩</span>
+              </button>
+              <div className="h-4 w-px bg-slate-700/80" />
+              <button
+                onClick={handleRedo}
+                disabled={editorFuture.length === 0}
+                className="h-full px-2 hover:bg-slate-700/70 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg text-xs font-bold text-slate-300 hover:text-white transition flex items-center justify-center"
+                title="やり直す (Ctrl+Y / Ctrl+Shift+Z)"
+              >
+                <span className="text-amber-400 font-black text-sm leading-none">↪</span>
+              </button>
+            </div>
 
-            <div className="h-6 w-px bg-slate-700 hidden sm:block shrink-0"></div>
+            <div className="h-5 w-px bg-slate-800 hidden sm:block shrink-0" />
 
-            {/* 設定ポップアップを開くボタン ("題名・音源設定" から "設定" に改称) */}
+            {/* 設定ポップアップを開くボタン */}
             <button
               onClick={() => setShowFormationSettingsModal(true)}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-bold text-white transition flex items-center gap-1 shadow shrink-0"
+              className="h-9 px-2.5 bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-xs font-bold text-slate-200 transition flex items-center gap-1.5 shadow-xs shrink-0"
               title="タイトル、曲名、音源、全体テンポなどを設定します"
             >
               <Music className="w-3.5 h-3.5 text-blue-400" />
-              <span>設定</span>
+              <span className="text-[11px]">設定</span>
             </button>
 
-            {/* 印刷用ブックレットボタン */}
+            {/* 印刷ボタン */}
             <button
               onClick={() => setIsPrintMode(true)}
-              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1.5 rounded text-xs font-bold text-white transition flex items-center gap-1 shadow shrink-0"
+              className="h-9 px-2.5 bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-xs font-bold text-slate-200 transition flex items-center gap-1.5 shadow-xs shrink-0"
               title="コマ表を印刷します"
             >
-              <svg className="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-              </svg>
-              <span>印刷</span>
+              <Printer className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-[11px]">印刷</span>
             </button>
 
             {/* 保存ボタン */}
             <div className="relative shrink-0">
               <button
                 onClick={handleSaveFormation}
-                className="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-xs font-bold text-white transition-colors flex items-center gap-1 shadow"
+                className={`h-9 px-3 rounded-xl text-xs font-bold text-white transition flex items-center gap-1.5 shadow-md active:scale-95 ${
+                  saveStatus
+                    ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/30"
+                    : "bg-blue-600 hover:bg-blue-500 shadow-blue-900/30"
+                }`}
+                title="コマ表を保存"
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>保存</span>
-                {isDirty && (
-                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border border-slate-900" />
+                {saveStatus ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-white" />
+                    <span className="text-[11px]">完了</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span className="text-[11px]">保存</span>
+                  </>
+                )}
+                {isDirty && !saveStatus && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-slate-900 animate-pulse" />
                 )}
               </button>
             </div>
-
-            {saveStatus && (
-              <span className="hidden lg:inline text-[11px] font-semibold text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-900/50 px-2 py-1 rounded shrink-0">
-                {saveStatus}
-              </span>
-            )}
           </div>
         ) : activeView === "field_designer" ? (
           <div className="flex items-center gap-4">
@@ -2802,7 +3289,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
                           {!isDefault && (
                             <>
                               <button
@@ -2846,7 +3333,7 @@ export default function App() {
                     <span>登録部員管理 ({members.length})</span>
                   </h3>
                   <button
-                    onClick={() => setShowNewMemberModal(true)}
+                    onClick={openNewMemberModal}
                     className="p-1.5 bg-blue-50 hover:bg-blue-100 rounded-lg text-blue-600 transition flex items-center gap-1 text-[11px] font-bold"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -2864,39 +3351,52 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[450px] overflow-y-auto pr-1">
-                    {members.map((m) => (
-                      <div
-                        key={m.id}
-                        className="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200/40 transition text-xs"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span
-                            className="w-3 h-3 rounded-full shrink-0 border border-white shadow-sm"
-                            style={{ backgroundColor: m.color }}
-                          />
-                          <div className="min-w-0">
-                            <p className="font-bold text-slate-800 truncate">{m.name}</p>
+                    {members.map((m) => {
+                      const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
+                      return (
+                        <div
+                          key={m.id}
+                          className="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200/40 transition text-xs"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span
+                              className="w-3.5 h-3.5 rounded-full shrink-0 border border-white shadow-sm"
+                              style={{ backgroundColor: m.color }}
+                            />
+                            <div className="min-w-0 flex items-center gap-2">
+                              <span className="font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                <span className="font-mono text-slate-900 font-bold text-xs shrink-0">
+                                  {mLabel}
+                                </span>
+                                {m.name ? (
+                                  <span className="truncate font-mono text-slate-900 font-bold text-xs">{m.name}</span>
+                                ) : null}
+                              </span>
+                            </div>
                           </div>
-                        </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             onClick={() => openEditMemberModal(m)}
-                            className="p-1 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded transition"
+                            className="p-1.5 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition"
                             title="部員情報を編集"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDeleteMember(m.id)}
-                            className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded transition"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteMember(m.id);
+                            }}
+                            className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition"
                             title="部員を削除"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
+                </div>
                 )}
               </section>
             </div>
@@ -2984,6 +3484,7 @@ export default function App() {
                   className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 w-full focus:outline-none"
                 >
                   <option value="cross">十字 (+)</option>
+                  <option value="x">クロス (×)</option>
                   <option value="t_up">T字上 (┴)</option>
                   <option value="t_down">T字下 (┬)</option>
                   <option value="t_left">T字左 (┤)</option>
@@ -3079,29 +3580,54 @@ export default function App() {
 
             {/* カスタムマーカー編集セクション */}
             <div className="border-t border-slate-100 pt-4 flex-1 flex flex-col min-h-[300px]">
-              <div className="flex justify-between items-center mb-2">
+              <div className="flex justify-between items-center mb-2 gap-1.5 flex-wrap">
                 <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
                   カスタム基準マーク ({designerCustomMarkers.length})
                 </h4>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (designerCustomMarkers.length >= 50) {
-                      alert("マーカーは最大50個まで配置可能です。");
-                      return;
-                    }
-                    saveDesignerHistory();
-                    const newMarker: CustomMarker = {
-                      id: `custom-marker-${Date.now()}`,
-                      x: 0.5,
-                      y: 0.5,
-                    };
-                    setDesignerCustomMarkers([...designerCustomMarkers, newMarker]);
-                  }}
-                  className="text-xs bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold px-2.5 py-1 rounded-lg transition"
-                >
-                  + 新マーク追加
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {selectedDesignerMarkerId && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMarker()}
+                      className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded-lg transition flex items-center gap-1 shadow-2xs"
+                      title="選択中のマーカーをコピー (Ctrl+C)"
+                    >
+                      <Copy className="w-3 h-3 text-blue-600" />
+                      コピー
+                    </button>
+                  )}
+                  {copiedMarker && (
+                    <button
+                      type="button"
+                      onClick={() => handlePasteMarker()}
+                      className="text-xs bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 font-bold px-2 py-1 rounded-lg transition flex items-center gap-1 shadow-2xs"
+                      title="コピーしたマーカーを貼り付け (Ctrl+V)"
+                    >
+                      <Copy className="w-3 h-3 text-emerald-600" />
+                      貼り付け
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (designerCustomMarkers.length >= 50) {
+                        alert("マーカーは最大50個まで配置可能です。");
+                        return;
+                      }
+                      saveDesignerHistory();
+                      const newMarker: CustomMarker = {
+                        id: `custom-marker-${Date.now()}`,
+                        x: 0.5,
+                        y: 0.5,
+                      };
+                      setDesignerCustomMarkers([...designerCustomMarkers, newMarker]);
+                      setSelectedDesignerMarkerId(newMarker.id);
+                    }}
+                    className="text-xs bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold px-2.5 py-1 rounded-lg transition shrink-0"
+                  >
+                    + 新マーク追加
+                  </button>
+                </div>
               </div>
 
               <p className="text-[10px] text-slate-400 leading-relaxed mb-3">
@@ -3129,7 +3655,7 @@ export default function App() {
                             マーク {m.label ? `${m.label} (#${idx + 1})` : idx + 1}
                           </span>
                           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <span className="font-mono text-[9px] text-slate-400">({m.x.toFixed(2)}, {m.y.toFixed(2)})</span>
+                            <span className="font-mono text-[9px] text-slate-400">({(m.x * designerBlocksX).toFixed(1)}, {(m.y * designerBlocksY).toFixed(1)})</span>
                             <button
                               type="button"
                               onClick={() => {
@@ -3163,6 +3689,7 @@ export default function App() {
                             >
                               <option value="">(デフォルト)</option>
                               <option value="cross">十字 (+)</option>
+                              <option value="x">クロス (×)</option>
                               <option value="t_up">T字上 (┴)</option>
                               <option value="t_down">T字下 (┬)</option>
                               <option value="t_left">T字左 (┤)</option>
@@ -3197,17 +3724,19 @@ export default function App() {
 
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="text-[9px] text-slate-400 font-bold block mb-0.5 font-mono">X (0.0〜1.0)</label>
+                          <label className="text-[9px] text-slate-400 font-bold block mb-0.5 font-mono">X</label>
                           <input
                             type="number"
-                            step="0.01"
+                            step="0.05"
                             min="0"
-                            max="1"
-                            value={m.x}
+                            max={designerBlocksX}
+                            value={Number((m.x * designerBlocksX).toFixed(2))}
                             onChange={(e) => {
+                              const val = parseFloat(e.target.value);
                               const updated = designerCustomMarkers.map((item) => {
                                 if (item.id === m.id) {
-                                  return { ...item, x: parseFloat(e.target.value) || 0 };
+                                  const newX = isNaN(val) ? 0 : Math.max(0, Math.min(1, val / designerBlocksX));
+                                  return { ...item, x: newX };
                                 }
                                 return item;
                               });
@@ -3217,17 +3746,19 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="text-[9px] text-slate-400 font-bold block mb-0.5 font-mono">Y (0.0〜1.0)</label>
+                          <label className="text-[9px] text-slate-400 font-bold block mb-0.5 font-mono">Y</label>
                           <input
                             type="number"
-                            step="0.01"
+                            step="0.05"
                             min="0"
-                            max="1"
-                            value={m.y}
+                            max={designerBlocksY}
+                            value={Number((m.y * designerBlocksY).toFixed(2))}
                             onChange={(e) => {
+                              const val = parseFloat(e.target.value);
                               const updated = designerCustomMarkers.map((item) => {
                                 if (item.id === m.id) {
-                                  return { ...item, y: parseFloat(e.target.value) || 0 };
+                                  const newY = isNaN(val) ? 0 : Math.max(0, Math.min(1, val / designerBlocksY));
+                                  return { ...item, y: newY };
                                 }
                                 return item;
                               });
@@ -3456,25 +3987,25 @@ export default function App() {
           )}
 
           {/* 中央カラム: The Field Stage & 整列コントロール */}
-          <section className="flex-1 bg-slate-300 p-1 md:p-2 flex flex-col items-center justify-start relative overflow-y-auto">
+          <section className="flex-1 bg-slate-300 p-1 md:p-2 flex flex-col items-center justify-start relative overflow-y-auto h-full min-h-0">
             
-            <div className="w-full max-w-full flex flex-col gap-2.5">
+            <div className="w-full max-w-full flex flex-col gap-2 flex-1 min-h-0">
 
-              {/* 整列配置（Align Tool）パネル（枠内に完全に収まるカードレイアウト） */}
+              {/* 整列配置（Align Tool）パネル（枠内に完全に収まるコンパクトカードレイアウト） */}
               {isAlignToolActive && (
-                <div className="bg-white border border-slate-200 shadow-xl rounded-2xl p-4 flex flex-col gap-3 w-full overflow-hidden">
+                <div className="bg-white border border-slate-300 shadow-xl rounded-2xl p-3 sm:p-3.5 flex flex-col gap-2.5 w-full max-h-[75vh] sm:max-h-[340px] overflow-y-auto shrink-0 transition-all">
                   {/* ヘッダー */}
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-100 shrink-0 sticky top-0 bg-white z-10">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-pulse" />
                       <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                        整列配置
+                        整列配置コントロール
                       </h4>
                     </div>
                     <button
                       type="button"
                       onClick={() => setIsAlignToolActive(false)}
-                      className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded transition"
+                      className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded transition cursor-pointer"
                       title="閉じる"
                     >
                       <X className="w-4 h-4" />
@@ -3482,17 +4013,17 @@ export default function App() {
                   </div>
 
                   {/* 形状選択・パラメータ ＆ 対象部員選択 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 text-xs">
                     {/* 1. 形状 & パラメータ */}
-                    <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-col justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-col gap-1.5">
+                    <div className="space-y-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex flex-col justify-between">
+                      <div className="space-y-1.5">
+                        <div className="flex flex-col gap-1">
                           <span className="font-bold text-slate-700 text-[11px] whitespace-nowrap">① 整列の形状:</span>
                           <div className="flex bg-white p-0.5 rounded-lg border border-slate-200 shadow-xs self-start">
                             <button
                               type="button"
                               onClick={() => setAlignType("line")}
-                              className={`px-2.5 py-1 rounded-md text-[10.5px] font-bold transition ${
+                              className={`px-2 py-1 rounded-md text-[10.5px] font-bold transition cursor-pointer ${
                                 alignType === "line" ? "bg-blue-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"
                               }`}
                             >
@@ -3501,7 +4032,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => setAlignType("arc")}
-                              className={`px-2.5 py-1 rounded-md text-[10.5px] font-bold transition ${
+                              className={`px-2 py-1 rounded-md text-[10.5px] font-bold transition cursor-pointer ${
                                 alignType === "arc" ? "bg-blue-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"
                               }`}
                             >
@@ -3510,7 +4041,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => setAlignType("circle")}
-                              className={`px-2.5 py-1 rounded-md text-[10.5px] font-bold transition ${
+                              className={`px-2 py-1 rounded-md text-[10.5px] font-bold transition cursor-pointer ${
                                 alignType === "circle" ? "bg-blue-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"
                               }`}
                             >
@@ -3532,7 +4063,7 @@ export default function App() {
                         )}
 
                         {alignType === "circle" && (
-                          <div className="space-y-1.5">
+                          <div className="space-y-1">
                             <p className="text-[10.5px] text-slate-500 leading-snug">
                               フィールド上のピン (<strong>C</strong>) で円の大きさを調整できます
                             </p>
@@ -3555,18 +4086,18 @@ export default function App() {
                     </div>
 
                     {/* 2. 対象部員選択 */}
-                    <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-col justify-between">
+                    <div className="space-y-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex flex-col justify-between">
                       <div className="space-y-1.5">
                         <div className="flex justify-between items-center">
                           <span className="font-bold text-slate-700 text-[11px]">② 整列する対象部員 ({alignSelectedMemberIds.length}名):</span>
-                          <span className="text-[10px] text-slate-400">ドットのクリックで選択可能</span>
+                          <span className="text-[10px] text-slate-400">ドットクリックでも選択可</span>
                         </div>
 
-                        <div className="flex flex-wrap gap-1.5 items-center">
+                        <div className="flex flex-wrap gap-1 items-center">
                           <button
                             type="button"
                             onClick={() => setAlignSelectedMemberIds(members.map((m) => m.id))}
-                            className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold px-2 py-1 rounded text-[10.5px] transition shadow-xs"
+                            className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded text-[10px] transition shadow-xs cursor-pointer"
                           >
                             全員選択
                           </button>
@@ -3578,7 +4109,7 @@ export default function App() {
                                 setAlignSelectedMemberIds(filtered);
                               }
                             }}
-                            className="bg-white border border-slate-200 text-[10.5px] font-bold px-2 py-1 rounded shadow-xs focus:outline-none"
+                            className="bg-white border border-slate-200 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs focus:outline-none cursor-pointer"
                           >
                             <option value="">パート選択...</option>
                             {Array.from(new Set(members.map((m) => m.instrument))).map((inst) => (
@@ -3590,14 +4121,14 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => setShowAlignMemberSelector(true)}
-                            className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold px-2.5 py-1 rounded text-[10.5px] transition shadow-xs"
+                            className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold px-2 py-0.5 rounded text-[10px] transition shadow-xs cursor-pointer"
                           >
                             任意部員を選択...
                           </button>
                           <button
                             type="button"
                             onClick={() => setAlignSelectedMemberIds([])}
-                            className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-500 font-bold px-2 py-1 rounded text-[10.5px] transition shadow-xs"
+                            className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-500 font-bold px-1.5 py-0.5 rounded text-[10px] transition shadow-xs cursor-pointer"
                           >
                             クリア
                           </button>
@@ -3606,18 +4137,18 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={reverseAlignMembers}
-                                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold px-2 py-1 rounded text-[10.5px] transition shadow-xs flex items-center gap-1"
+                                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold px-1.5 py-0.5 rounded text-[10px] transition shadow-xs cursor-pointer"
                                 title="並び順を完全に反転します"
                               >
-                                <span>⇄ 逆順反転</span>
+                                ⇄ 逆順
                               </button>
                               <button
                                 type="button"
                                 onClick={sortAlignMembersByInstrument}
-                                className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold px-2 py-1 rounded text-[10.5px] transition shadow-xs"
+                                className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded text-[10px] transition shadow-xs cursor-pointer"
                                 title="パート名・名前順に並べ替えます"
                               >
-                                <span>↓ パート順</span>
+                                ↓ パート順
                               </button>
                             </>
                           )}
@@ -3627,17 +4158,17 @@ export default function App() {
                         {alignSelectedMemberIds.length > 0 && (
                           <div className="space-y-1">
                             <div className="flex justify-between items-center text-[9.5px] text-slate-500 font-semibold px-0.5">
-                              <span>並び順 (左端/1番目がA点側になります):</span>
-                              <span className="text-[9px] text-slate-400">◀ ▶ で個別に順序移動可能</span>
+                              <span>並び順 (左端/1番目がA点側):</span>
+                              <span className="text-[9px] text-slate-400">◀ ▶ で順序移動</span>
                             </div>
-                            <div className="flex flex-wrap gap-1 mt-0.5 max-h-24 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200 shadow-inner">
+                            <div className="flex flex-wrap gap-1 mt-0.5 max-h-16 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200 shadow-inner">
                               {alignSelectedMemberIds.map((mId, idx) => {
                                 const member = members.find((m) => m.id === mId);
                                 if (!member) return null;
                                 return (
                                   <span
                                     key={mId}
-                                    className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded text-[10px] font-semibold transition hover:border-slate-300"
+                                    className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded text-[9.5px] font-semibold transition hover:border-slate-300"
                                   >
                                     <span className="text-slate-400 font-mono text-[9px] font-black">{idx + 1}.</span>
                                     <span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ backgroundColor: member.color }} />
@@ -3647,7 +4178,7 @@ export default function App() {
                                         type="button"
                                         disabled={idx === 0}
                                         onClick={() => moveAlignMember(idx, -1)}
-                                        className="hover:text-blue-600 disabled:opacity-20 transition font-black text-[10px] px-0.5 hover:bg-slate-200 rounded"
+                                        className="hover:text-blue-600 disabled:opacity-20 transition font-black text-[9px] px-0.5 hover:bg-slate-200 rounded cursor-pointer"
                                         title="前の順番へ"
                                       >
                                         ◀
@@ -3656,7 +4187,7 @@ export default function App() {
                                         type="button"
                                         disabled={idx === alignSelectedMemberIds.length - 1}
                                         onClick={() => moveAlignMember(idx, 1)}
-                                        className="hover:text-blue-600 disabled:opacity-20 transition font-black text-[10px] px-0.5 hover:bg-slate-200 rounded"
+                                        className="hover:text-blue-600 disabled:opacity-20 transition font-black text-[9px] px-0.5 hover:bg-slate-200 rounded cursor-pointer"
                                         title="後ろの順番へ"
                                       >
                                         ▶
@@ -3665,7 +4196,7 @@ export default function App() {
                                     <button
                                       type="button"
                                       onClick={() => toggleAlignMemberId(mId)}
-                                      className="hover:text-red-500 transition font-bold ml-0.5 text-slate-400"
+                                      className="hover:text-red-500 transition font-bold ml-0.5 text-slate-400 cursor-pointer"
                                       title="選択解除"
                                     >
                                       ×
@@ -3680,12 +4211,12 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 実行ボタン領域 (枠内に収まるレスポンシブ配置) */}
-                  <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-100 w-full shrink-0">
+                  {/* 実行ボタン領域 (枠内に収まるレスポンシブ配置 & sticky) */}
+                  <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-100 w-full shrink-0 sticky bottom-0 bg-white z-10">
                     <button
                       type="button"
                       onClick={() => setIsAlignToolActive(false)}
-                      className="px-4 py-2 text-slate-500 hover:bg-slate-100 font-semibold rounded-xl text-xs transition"
+                      className="px-3 py-1.5 text-slate-500 hover:bg-slate-100 font-semibold rounded-xl text-xs transition cursor-pointer"
                     >
                       キャンセル
                     </button>
@@ -3693,7 +4224,7 @@ export default function App() {
                       type="button"
                       onClick={applyMemberAlignment}
                       disabled={alignSelectedMemberIds.length === 0}
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-xs transition shadow-md shadow-emerald-600/20 flex items-center gap-1.5 shrink-0"
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-xs transition shadow-md shadow-emerald-600/20 flex items-center gap-1.5 shrink-0 cursor-pointer"
                     >
                       <Check className="w-4 h-4" />
                       <span>整列を実行 (適用)</span>
@@ -3702,17 +4233,26 @@ export default function App() {
                 </div>
               )}
 
-              <div className="flex items-center justify-end">
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-600 select-none bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-xs hover:bg-slate-50 transition">
-                    <input
-                      type="checkbox"
-                      checked={snapToGrid}
-                      onChange={(e) => setSnapToGrid(e.target.checked)}
-                      className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 border-slate-300"
-                    />
-                    <span>グリッドにスナップ</span>
-                  </label>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {selectedMemberIds.length > 0 && (
+                    <div className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1 rounded-lg text-xs font-bold shadow-sm">
+                      <span className="text-blue-400">{selectedMemberIds.length}名選択中</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMemberIds([])}
+                        className="text-slate-400 hover:text-white transition text-xs font-normal border-l border-slate-700 pl-2"
+                      >
+                        選択解除
+                      </button>
+                    </div>
+                  )}
+                  <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+                    ※ドラッグで範囲選択、Shift+クリックで個別追加選択ができます
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
                   {isPlaying && (
                     <div className="flex items-center gap-1.5 animate-pulse text-xs text-blue-600 font-bold font-mono">
                       <span className="w-2 h-2 rounded-full bg-blue-600" />
@@ -3728,8 +4268,23 @@ export default function App() {
                 prevSet={prevSet}
                 members={members}
                 selectedMemberId={selectedMemberId}
+                showMemberLabels={showMemberLabels}
                 onSelectMember={setSelectedMemberId}
+                selectedMemberIds={selectedMemberIds}
+                onSelectMembers={(ids) => {
+                  setSelectedMemberIds(ids);
+                  if (ids.length === 1) {
+                    setSelectedMemberId(ids[0]);
+                  } else if (ids.length === 0) {
+                    setSelectedMemberId(null);
+                  } else if (selectedMemberId === null || !ids.includes(selectedMemberId)) {
+                    setSelectedMemberId(ids[0]);
+                  }
+                }}
                 onUpdatePosition={handleUpdatePosition}
+                onUpdatePositions={handleUpdatePositions}
+                onBeforeDragStart={saveEditorHistory}
+                snapMode={snapMode}
                 showGhost={showGhost}
                 isPlaying={isPlaying}
                 currentCount={currentCount}
@@ -3753,9 +4308,25 @@ export default function App() {
                 subGridLineStyle={activeFormation.subGridLineStyle}
                 showGridLines={activeFormation.showGridLines !== false}
                 customMarkers={activeFormation.customMarkers || []}
+                selectedCustomMarkerId={selectedDesignerMarkerId}
+                onSelectCustomMarker={(id) => setSelectedDesignerMarkerId(id)}
+                onUpdateMarker={(markerId, x, y) => {
+                  saveEditorHistory();
+                  const updated = (activeFormation.customMarkers || []).map((m) => {
+                    if (m.id === markerId) return { ...m, x, y };
+                    return m;
+                  });
+                  setActiveFormation({
+                    ...activeFormation,
+                    customMarkers: updated,
+                  });
+                }}
                 snapToGrid={snapToGrid}
                 setInstructions={setInstructions}
                 memberVariables={selectedSetId ? (memberVariables[selectedSetId] || {}) : {}}
+                memberGroups={selectedSetId ? (memberGroupsBySet[selectedSetId] || []) : []}
+                memberGroupsBySet={memberGroupsBySet}
+                memberVariablesBySet={memberVariables}
                 
                 // 配置ツール統合
                 isAlignActive={isAlignToolActive}
@@ -3776,6 +4347,8 @@ export default function App() {
                 onUpdateAlignEndAngle={(deg) => setAlignEndAngle(deg)}
                 onToggleAlignMemberId={toggleAlignMemberId}
                 alignSelectedMemberIds={alignSelectedMemberIds}
+                enableCollisionDetection={enableCollisionDetection}
+                onToggleCollisionDetection={() => setEnableCollisionDetection((prev) => !prev)}
               />
             </div>
           </section>
@@ -3830,8 +4403,9 @@ export default function App() {
             onAutoAssignVariablesFromX={handleAutoAssignVariablesFromX}
             onBatchSetVariables={handleBatchSetVariables}
             onDeleteMember={handleDeleteMember}
+            onDeleteAllMembers={handleDeleteAllMembers}
             onEditMember={openEditMemberModal}
-            onShowNewMemberModal={() => setShowNewMemberModal(true)}
+            onShowNewMemberModal={openNewMemberModal}
             isRightSidebarOpen={isRightSidebarOpen}
             setIsRightSidebarOpen={setIsRightSidebarOpen}
             memberCustomLabels={memberCustomLabels}
@@ -3839,15 +4413,19 @@ export default function App() {
               setMemberCustomLabels({ ...memberCustomLabels, [memberId]: label });
               setIsDirty(true);
             }}
-            memberGroups={memberGroups}
+            memberGroups={selectedSetId ? (memberGroupsBySet[selectedSetId] || []) : []}
             onUpdateMemberGroups={(groups) => {
-              setMemberGroups(groups);
-              setIsDirty(true);
+              if (selectedSetId) {
+                setMemberGroupsBySet((prev) => ({ ...prev, [selectedSetId]: groups }));
+                setIsDirty(true);
+              }
             }}
             activeTab={activeRightSidebarTab}
             onTabChange={(tab) => setActiveRightSidebarTab(tab)}
             allSetCollisions={allSetCollisions}
             onSelectSet={(setId) => setSelectedSetId(setId)}
+            enableCollisionDetection={enableCollisionDetection}
+            onToggleCollisionDetection={() => setEnableCollisionDetection((prev) => !prev)}
           />
         </main>
       ) : null}
@@ -3942,27 +4520,15 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white border border-slate-200 rounded-xl w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-base font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
-              新規メンバー追加
+              新規部員の追加
             </h3>
             <form onSubmit={handleCreateMember} className="space-y-4">
               <div>
-                <label className="text-xs text-slate-600 font-semibold block mb-1">メンバー名 *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="例: 山田 太郎"
-                  value={newMemberName}
-                  onChange={(e) => setNewMemberName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-600 font-semibold block mb-1">パート / 楽器 *</label>
+                <label className="text-xs text-slate-600 font-semibold block mb-1">パート *</label>
                 <select
                   value={newMemberInstrument}
-                  onChange={(e) => setNewMemberInstrument(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => handleNewMemberInstrumentChange(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 >
                   {instruments.map((inst) => (
                     <option key={inst} value={inst}>
@@ -3970,6 +4536,34 @@ export default function App() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-600 font-semibold block mb-1">表示名 *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="例: Fl1"
+                  value={newMemberLabel}
+                  onChange={(e) => setNewMemberLabel(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ※同じ楽器が登録されると Fl1, Fl2, Tp1 のように通し番号が自動で振られます。
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-600 font-semibold block mb-1">
+                  部員名 <span className="text-slate-400 font-normal">(任意)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="例: 山田 花子"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               <div>
@@ -4001,7 +4595,7 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition shadow-md shadow-blue-500/20"
                 >
                   登録する
                 </button>
@@ -4027,23 +4621,17 @@ export default function App() {
             </h3>
             <form onSubmit={handleSaveEditMember} className="space-y-4">
               <div>
-                <label className="text-xs text-slate-600 font-semibold block mb-1">部員名 *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="例: 山田 太郎"
-                  value={editMemberName}
-                  onChange={(e) => setEditMemberName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-600 font-semibold block mb-1">パート / 楽器 *</label>
+                <label className="text-xs text-slate-600 font-semibold block mb-1">パート *</label>
                 <select
                   value={editMemberInstrument}
-                  onChange={(e) => setEditMemberInstrument(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    const inst = e.target.value;
+                    setEditMemberInstrument(inst);
+                    if (!editMemberLabel) {
+                      setEditMemberLabel(generateNextMemberLabel(inst, members, memberCustomLabels));
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 >
                   {instruments.map((inst) => (
                     <option key={inst} value={inst}>
@@ -4051,6 +4639,31 @@ export default function App() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-600 font-semibold block mb-1">表示名 *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="例: Fl1"
+                  value={editMemberLabel}
+                  onChange={(e) => setEditMemberLabel(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-600 font-semibold block mb-1">
+                  部員名 <span className="text-slate-400 font-normal">(任意)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="例: 山田 花子"
+                  value={editMemberName}
+                  onChange={(e) => setEditMemberName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               <div>
@@ -4072,7 +4685,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setEditingMember(null)}
@@ -4260,7 +4873,7 @@ export default function App() {
                           gridLineColor: chosenTemplate.gridLineColor,
                           gridLineWidth: chosenTemplate.gridLineWidth,
                           gridLineStyle: chosenTemplate.gridLineStyle,
-                          subGridLineStyle: chosenTemplate.subGridLineStyle || "dashed",
+                          subGridLineStyle: chosenTemplate.subGridLineStyle || "solid",
                           showYardLines: chosenTemplate.showYardLines,
                           showYardNumbers: chosenTemplate.showYardNumbers,
                           showGridLines: chosenTemplate.showGridLines,
@@ -4394,25 +5007,29 @@ export default function App() {
                     選択クリア
                   </button>
                 </div>
-                {memberGroups.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1 w-full pt-1 border-t border-slate-200">
-                    <span className="text-[10px] text-slate-500 font-bold shrink-0">グループで追加:</span>
-                    {memberGroups.map((g) => (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => {
-                          const newIds = Array.from(new Set([...alignSelectedMemberIds, ...g.memberIds]));
-                          setAlignSelectedMemberIds(newIds);
-                        }}
-                        className="bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-1.5 py-0.5 rounded font-semibold text-[10px] shadow-2xs transition"
-                        title={`${g.name}の部員(${g.memberIds.length}名)を選択に追加`}
-                      >
-                        + {g.name} ({g.memberIds.length}名)
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  const currentAlignGroups = selectedSetId ? (memberGroupsBySet[selectedSetId] || []) : [];
+                  if (currentAlignGroups.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap items-center gap-1 w-full pt-1 border-t border-slate-200">
+                      <span className="text-[10px] text-slate-500 font-bold shrink-0">グループで追加:</span>
+                      {currentAlignGroups.map((g) => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => {
+                            const newIds = Array.from(new Set([...alignSelectedMemberIds, ...g.memberIds]));
+                            setAlignSelectedMemberIds(newIds);
+                          }}
+                          className="bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-1.5 py-0.5 rounded font-semibold text-[10px] shadow-2xs transition"
+                          title={`${g.name}の部員(${g.memberIds.length}名)を選択に追加`}
+                        >
+                          + {g.name} ({g.memberIds.length}名)
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -4461,6 +5078,108 @@ export default function App() {
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs transition shadow-md shadow-blue-500/15"
               >
                 決定 ({alignSelectedMemberIds.length}名)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* キーボードショートカット一覧モーダル */}
+      {showShortcutsModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 text-white border border-slate-700/80 w-full max-w-lg rounded-2xl p-6 shadow-2xl relative space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Keyboard className="w-5 h-5 text-blue-400" />
+                <h3 className="font-bold text-base text-white">キーボードショートカット一覧</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShortcutsModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">再生 / 一時停止</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Space</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">前 / 次のセット</span>
+                <div className="flex gap-1 font-mono">
+                  <kbd className="bg-slate-700 text-slate-100 px-1.5 py-0.5 rounded border border-slate-600 font-bold text-[11px]">←</kbd>
+                  <kbd className="bg-slate-700 text-slate-100 px-1.5 py-0.5 rounded border border-slate-600 font-bold text-[11px]">→</kbd>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">元に戻す</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Ctrl + Z</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">やり直す</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Ctrl + Y</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">コンテ保存</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Ctrl + S</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">部員を全員選択</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Ctrl + A</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">スナップ ON/OFF</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">G</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">マーカー コピー / 貼り付け</span>
+                <div className="flex gap-1 font-mono">
+                  <kbd className="bg-slate-700 text-slate-100 px-1.5 py-0.5 rounded border border-slate-600 font-bold text-[11px]">Ctrl + C</kbd>
+                  <kbd className="bg-slate-700 text-slate-100 px-1.5 py-0.5 rounded border border-slate-600 font-bold text-[11px]">Ctrl + V</kbd>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">マーカー 削除</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Delete / BS</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">選択解除 / 閉じる</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">Esc</kbd>
+              </div>
+
+              <div className="bg-slate-800/80 border border-slate-700/60 p-2.5 rounded-xl flex items-center justify-between">
+                <span className="text-slate-300 font-medium">ヘルプ表示</span>
+                <kbd className="bg-slate-700 text-slate-100 font-mono px-2 py-0.5 rounded border border-slate-600 shadow-2xs font-bold text-[11px]">?</kbd>
+              </div>
+            </div>
+
+            <div className="bg-slate-800/50 border border-slate-800 p-3 rounded-xl text-[11px] text-slate-400 space-y-1">
+              <p className="font-bold text-slate-300">💡 その他の操作ヒント:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li><span className="font-bold text-slate-200">範囲選択</span>: フィールド上でドラッグすると複数部員を一括選択できます</li>
+                <li><span className="font-bold text-slate-200">複数個別選択</span>: <kbd className="bg-slate-700 text-slate-200 px-1 rounded text-[10px]">Shift</kbd> + 部員クリックで追加選択できます</li>
+              </ul>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowShortcutsModal(false)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs transition"
+              >
+                閉じる
               </button>
             </div>
           </div>

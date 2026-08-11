@@ -44,8 +44,8 @@ export function calculateMoveInstructions(
 }
 
 /**
- * 現在の位置の「ドット（座標）」をヤード表記に翻訳する
- * 例: 「50ヤードから左に2.4歩、フロントハッシュから後ろに1.5歩」
+ * 現在の位置の「ドット（座標）」を歩数・ポイント表記に翻訳する
+ * 例: 「中央から左へ 8.0歩 / 手前から 16.0歩」
  */
 export function getYardLocationDescription(
   x: number,
@@ -53,81 +53,22 @@ export function getYardLocationDescription(
   totalXSteps: number = 128,
   totalYSteps: number = 64
 ): string {
-  // 1. X方向の計算
-  // ヤードラインの位置 (X比率)
-  const lines = [
-    { name: "左10ヤード", x: 0.1 },
-    { name: "左20ヤード", x: 0.2 },
-    { name: "左30ヤード", x: 0.3 },
-    { name: "左40ヤード", x: 0.4 },
-    { name: "50ヤード", x: 0.5 },
-    { name: "右40ヤード", x: 0.6 },
-    { name: "右30ヤード", x: 0.7 },
-    { name: "右20ヤード", x: 0.8 },
-    { name: "右10ヤード", x: 0.9 },
-  ];
-
-  // 最も近いヤードラインを見つける
-  let closestLine = lines[0];
-  let minDiff = Math.abs(x - lines[0].x);
-
-  for (let i = 1; i < lines.length; i++) {
-    const diff = Math.abs(x - lines[i].x);
-    if (diff < minDiff) {
-      minDiff = diff;
-      closestLine = lines[i];
-    }
-  }
-
-  const xDiffPct = x - closestLine.x;
-  const xDiffSteps = xDiffPct * totalXSteps;
+  // 1. X方向の計算 (中央基準)
+  const xDiffSteps = (x - 0.5) * totalXSteps;
   const xStepsAbs = Math.abs(Math.round(xDiffSteps * 10) / 10);
 
   let xDesc = "";
-  if (xStepsAbs < 0.2) {
-    xDesc = closestLine.name;
+  if (xStepsAbs < 0.1) {
+    xDesc = "中央";
+  } else if (xDiffSteps < 0) {
+    xDesc = `中央から左へ ${xStepsAbs}歩`;
   } else {
-    // 50ヤードラインから「左・右」
-    // 他のラインから「インサイド(50側)・アウトサイド(エンド側)」
-    if (closestLine.x === 0.5) {
-      xDesc = `50ヤードから${xDiffSteps > 0 ? "右" : "左"}に ${xStepsAbs}歩`;
-    } else {
-      const isLeftSide = closestLine.x < 0.5;
-      const isInside = isLeftSide ? xDiffSteps > 0 : xDiffSteps < 0;
-      xDesc = `${closestLine.name}から${isInside ? "インサイド" : "アウトサイド"}に ${xStepsAbs}歩`;
-    }
+    xDesc = `中央から右へ ${xStepsAbs}歩`;
   }
 
-  // 2. Y方向の計算
-  // 奥行き基準線
-  const yLines = [
-    { name: "フロントサイド(手前)", y: 0.0 },
-    { name: "フロントハッシュ", y: 0.33 },
-    { name: "バックハッシュ", y: 0.67 },
-    { name: "バックサイド(奥)", y: 1.0 },
-  ];
-
-  let closestY = yLines[0];
-  let minYDiff = Math.abs(y - yLines[0].y);
-
-  for (let i = 1; i < yLines.length; i++) {
-    const diff = Math.abs(y - yLines[i].y);
-    if (diff < minYDiff) {
-      minYDiff = diff;
-      closestY = yLines[i];
-    }
-  }
-
-  const yDiffPct = y - closestY.y;
-  const yDiffSteps = yDiffPct * totalYSteps;
-  const yStepsAbs = Math.abs(Math.round(yDiffSteps * 10) / 10);
-
-  let yDesc = "";
-  if (yStepsAbs < 0.2) {
-    yDesc = closestY.name;
-  } else {
-    yDesc = `${closestY.name}から${yDiffSteps > 0 ? "後ろ" : "前"}に ${yStepsAbs}歩`;
-  }
+  // 2. Y方向の計算 (手前基準)
+  const ySteps = Math.round(y * totalYSteps * 10) / 10;
+  let yDesc = `手前から ${ySteps}歩`;
 
   return `${xDesc} / ${yDesc}`;
 }
@@ -142,7 +83,7 @@ export function normalizeInstructionText(text: string): string {
   // 2. 全角スペースを半角スペースに変換
   s = s.replace(/　/g, " ");
   // 3. 全角の括弧や記号を半角に
-  s = s.replace(/（/g, "(").replace(/）/g, ")").replace(/：/g, ":").replace(/ー/g, "-");
+  s = s.replace(/（/g, "(").replace(/）/g, ")").replace(/：/g, ":").replace(/[−―‐ー–—−]/g, "-");
   return s;
 }
 
@@ -176,8 +117,8 @@ export function evaluateInstructionFormula(text: string, xVal: number): string {
     iterations++;
   }
 
-  // カッコのない四則演算式 (例: 8-2 や 4+4) を評価・計算
-  substituted = substituted.replace(/\b\d+(?:\s*[-+*/]\s*\d+)+\b/g, (match) => {
+  // カッコのない四則演算式 (例: 8-2 や 16-3.5) を評価・計算
+  substituted = substituted.replace(/\b\d+(?:\.\d+)?(?:\s*[-+*/]\s*\d+(?:\.\d+)?)+\b/g, (match) => {
     try {
       const evalResult = Function(`"use strict"; return (${match})`)();
       return String(evalResult);
@@ -267,6 +208,122 @@ export function validateInstructionCounts(resolvedText: string, expectedCounts: 
     message: "カウント数一致",
     sum,
   };
+}
+
+/**
+ * 楽器名から規定の省略名（プレフィックス）を取得する
+ */
+export function getInstrumentPrefix(instrument: string): string {
+  if (!instrument) return "";
+  const norm = instrument.trim().toLowerCase();
+
+  if (norm.includes("flute") || norm.includes("フルート") || norm === "fl") return "Fl";
+  if (norm.includes("clarinet") || norm.includes("クラリネット") || norm === "cl") return "Cl";
+  if (norm.includes("alto") || norm.includes("アルト") || norm === "as") return "AS";
+  if (norm.includes("tenor") || norm.includes("テナー") || norm === "ts") return "TS";
+  if (norm.includes("trumpet") || norm.includes("トランペット") || norm === "tp") return "Tp";
+  if (norm.includes("trombone") || norm.includes("トロンボーン") || norm === "tb") return "Tb";
+  if (norm.includes("sousa") || norm.includes("スーザ") || norm.includes("tuba") || norm.includes("チューバ") || norm === "sou") return "Sou";
+  if (norm.includes("euph") || norm.includes("ユーフォ") || norm === "eu") return "Eu";
+  if (norm.includes("horn") || norm.includes("ホルン") || norm === "hr") return "Hr";
+  if (norm.includes("snare") || norm.includes("スネア") || norm === "sd") return "SD";
+  if (norm.includes("cymbal") || norm.includes("シンバル") || norm === "cym") return "Cym";
+  if (norm.includes("bass") || norm.includes("バス") || norm === "bd") return "BD";
+  if (norm.includes("quint") || norm.includes("クイント") || norm === "qt") return "QT";
+  if (norm.includes("guard") || norm.includes("ガード") || norm.includes("color guard") || norm === "cg") return ""; // カラーガードは通し番号のみ
+
+  if (norm.includes("major") || norm.includes("メジャー")) return "DM";
+
+  return instrument.replace(/[^a-zA-Z]/g, "").slice(0, 3) || instrument.slice(0, 2);
+}
+
+/**
+ * メンバーの有効な表示名（例: Tp1, Fl2, QT, 1 など）を計算する。
+ * 1. memberCustomLabels に設定があればそれを使用
+ * 2. m.label に設定があればそれを使用
+ * 3. 未設定の場合は同パート(楽器)内での順序に基づき自動計算（例: 1番目のTrumpetなら "Tp1"）
+ */
+export function getEffectiveMemberLabel(
+  m: { id: number; instrument: string; label?: string; name?: string },
+  members: { id: number; instrument: string; label?: string; name?: string }[],
+  memberCustomLabels?: Record<number, string>
+): string {
+  if (memberCustomLabels && memberCustomLabels[m.id] && memberCustomLabels[m.id].trim()) {
+    return memberCustomLabels[m.id].trim();
+  }
+  if (m.label && m.label.trim()) {
+    return m.label.trim();
+  }
+
+  const prefix = getInstrumentPrefix(m.instrument);
+
+  if (prefix === "QT" || m.instrument.trim().toLowerCase().includes("quint") || m.instrument.trim().toLowerCase().includes("クイント")) {
+    return "QT";
+  }
+
+  const sameInstMembers = members.filter((other) => {
+    const otherPrefix = getInstrumentPrefix(other.instrument);
+    return otherPrefix === prefix || other.instrument === m.instrument;
+  });
+
+  const index = sameInstMembers.findIndex((other) => String(other.id) === String(m.id));
+  const num = index >= 0 ? index + 1 : 1;
+
+  if (prefix === "") {
+    return String(num);
+  }
+
+  return `${prefix}${num}`;
+}
+
+/**
+ * 既存のメンバーリストに基づいて、新規追加されるメンバーの自動表示名（例: Tp1, Fl2, QT, 1 など）を生成する
+ */
+export function generateNextMemberLabel(
+  instrument: string,
+  existingMembers: { id?: number; instrument: string; label?: string; name?: string }[],
+  memberCustomLabels?: Record<number, string>
+): string {
+  const prefix = getInstrumentPrefix(instrument);
+
+  // 1. クイントは1台しかないため「QT」とする（通し番号なし）
+  if (prefix === "QT" || instrument.trim().toLowerCase().includes("quint") || instrument.trim().toLowerCase().includes("クイント")) {
+    return "QT";
+  }
+
+  // 2. 同じ楽器 (または同じプレフィックス) の既存メンバーから既に使用されている番号を抽出
+  const usedNumbers = new Set<number>();
+  for (const m of existingMembers) {
+    const mPrefix = getInstrumentPrefix(m.instrument);
+    if (mPrefix === prefix || m.instrument === instrument) {
+      const lbl = (m.id && memberCustomLabels && memberCustomLabels[m.id]) || m.label || "";
+      if (lbl) {
+        const match = lbl.match(/\d+$/);
+        if (match) {
+          usedNumbers.add(parseInt(match[0], 10));
+        }
+      }
+    }
+  }
+
+  let nextNumber = 1;
+  if (usedNumbers.size > 0) {
+    nextNumber = Math.max(...Array.from(usedNumbers)) + 1;
+  } else {
+    const count = existingMembers.filter((m) => {
+      const mPrefix = getInstrumentPrefix(m.instrument);
+      return mPrefix === prefix || m.instrument === instrument;
+    }).length;
+    nextNumber = count + 1;
+  }
+
+  // 3. カラーガードは通し番号のみ（例: "1", "2", "3"）
+  if (prefix === "") {
+    return String(nextNumber);
+  }
+
+  // 4. 一般の楽器は プレフィックス + 通し番号（例: "Fl1", "Tp2"）
+  return `${prefix}${nextNumber}`;
 }
 
 

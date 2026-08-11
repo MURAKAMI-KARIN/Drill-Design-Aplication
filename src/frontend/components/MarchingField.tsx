@@ -1,12 +1,22 @@
 import React, { useRef, useState, useEffect } from "react";
-import { Member, Set, Position, CustomMarker } from "../types";
-import { ArrowUpRight, ArrowRight, Move, MapPin } from "lucide-react";
-import { evaluateInstructionFormula, parseMotionCommands, normalizeInstructionText } from "../lib/marchingUtils";
+import { Member, Set, Position, CustomMarker, MemberGroup } from "../types";
+import { ArrowUpRight, ArrowRight, Move, MapPin, User, AlertTriangle, ZoomIn, ZoomOut } from "lucide-react";
+import { evaluateInstructionFormula, parseMotionCommands, normalizeInstructionText, getYardLocationDescription, getInstrumentPrefix, getEffectiveMemberLabel } from "../lib/marchingUtils";
 
 export function renderCustomMarkShape(shape: string, customColor?: string, defaultColor?: string) {
   const strokeColor = customColor || defaultColor || "rgba(255, 255, 255, 0.45)";
   const strokeW = 1.5;
   switch (shape) {
+    case "x":
+    case "x_mark":
+    case "バツ":
+    case "クロス×":
+      return (
+        <g stroke={strokeColor} strokeWidth={strokeW}>
+          <line x1={-5} y1={-5} x2={5} y2={5} />
+          <line x1={-5} y1={5} x2={5} y2={-5} />
+        </g>
+      );
     case "cross":
     case "十字":
       return (
@@ -123,6 +133,11 @@ interface MarchingFieldProps {
   onUpdateMarker?: (markerId: string, x: number, y: number) => void;
   setInstructions?: Record<number, any[]>;
   memberVariables?: Record<number, number>;
+  memberGroups?: MemberGroup[];
+  memberGroupsBySet?: Record<number, MemberGroup[]>;
+  memberVariablesBySet?: Record<number, Record<number, number>>;
+  memberCustomLabels?: Record<number, string>;
+  showMemberLabels?: boolean;
 
   // 配置ツール用のオプション
   isAlignActive?: boolean;
@@ -150,7 +165,239 @@ interface MarchingFieldProps {
   subdivisionsX?: number;
   subdivisionsY?: number;
   snapToGrid?: boolean;
+  snapMode?: "intersection" | "subdivision" | "none";
+  selectedMemberIds?: number[];
+  onSelectMembers?: (ids: number[]) => void;
+  onUpdatePositions?: (updates: { memberId: number; x: number; y: number }[]) => void;
+  onBeforeDragStart?: () => void;
   markerColor?: string;
+  enableCollisionDetection?: boolean;
+  onToggleCollisionDetection?: () => void;
+}
+
+interface SelectedMemberCoordinatePanelProps {
+  selectedMember: Member;
+  selectedCurPos: Position | null;
+  bX: number;
+  bY: number;
+  totalCellsX: number;
+  totalCellsY: number;
+  onUpdatePosition?: (memberId: number, xRatio: number, yRatio: number) => void;
+  onBeforeDragStart?: () => void;
+  setInstructions?: Record<number, any[]>;
+  currentSet?: Set | null;
+  memberGroups?: MemberGroup[];
+  memberVariables?: Record<number, number>;
+  memberCustomLabels?: Record<number, string>;
+  members?: Member[];
+}
+
+function SelectedMemberCoordinatePanel({
+  selectedMember,
+  selectedCurPos,
+  bX,
+  bY,
+  totalCellsX,
+  totalCellsY,
+  onUpdatePosition,
+  onBeforeDragStart,
+  setInstructions,
+  currentSet,
+  memberGroups,
+  memberVariables = {},
+  memberCustomLabels = {},
+  members = [],
+}: SelectedMemberCoordinatePanelProps) {
+  const curX = selectedCurPos?.x ?? 0.5;
+  const curY = selectedCurPos?.y ?? 0.5;
+
+  const [gridXStr, setGridXStr] = useState<string>((curX * bX).toFixed(2));
+  const [gridYStr, setGridYStr] = useState<string>((curY * bY).toFixed(2));
+  const [stepXStr, setStepXStr] = useState<string>((curX * totalCellsX).toFixed(1));
+  const [stepYStr, setStepYStr] = useState<string>((curY * totalCellsY).toFixed(1));
+
+  const [isFocusedGridX, setIsFocusedGridX] = useState(false);
+  const [isFocusedGridY, setIsFocusedGridY] = useState(false);
+  const [isFocusedStepX, setIsFocusedStepX] = useState(false);
+  const [isFocusedStepY, setIsFocusedStepY] = useState(false);
+
+  useEffect(() => {
+    if (!isFocusedGridX) setGridXStr((curX * bX).toFixed(2));
+    if (!isFocusedStepX) setStepXStr((curX * totalCellsX).toFixed(1));
+  }, [curX, bX, totalCellsX, isFocusedGridX, isFocusedStepX]);
+
+  useEffect(() => {
+    if (!isFocusedGridY) setGridYStr((curY * bY).toFixed(2));
+    if (!isFocusedStepY) setStepYStr((curY * totalCellsY).toFixed(1));
+  }, [curY, bY, totalCellsY, isFocusedGridY, isFocusedStepY]);
+
+  const handleGridXChange = (valStr: string) => {
+    setGridXStr(valStr);
+    const val = parseFloat(valStr);
+    if (!isNaN(val) && onUpdatePosition) {
+      const clampedRatio = Math.max(0, Math.min(1, val / bX));
+      onUpdatePosition(selectedMember.id, clampedRatio, curY);
+    }
+  };
+
+  const handleGridYChange = (valStr: string) => {
+    setGridYStr(valStr);
+    const val = parseFloat(valStr);
+    if (!isNaN(val) && onUpdatePosition) {
+      const clampedRatio = Math.max(0, Math.min(1, val / bY));
+      onUpdatePosition(selectedMember.id, curX, clampedRatio);
+    }
+  };
+
+  const handleStepXChange = (valStr: string) => {
+    setStepXStr(valStr);
+    const val = parseFloat(valStr);
+    if (!isNaN(val) && onUpdatePosition) {
+      const clampedRatio = Math.max(0, Math.min(1, val / totalCellsX));
+      onUpdatePosition(selectedMember.id, clampedRatio, curY);
+    }
+  };
+
+  const handleStepYChange = (valStr: string) => {
+    setStepYStr(valStr);
+    const val = parseFloat(valStr);
+    if (!isNaN(val) && onUpdatePosition) {
+      const clampedRatio = Math.max(0, Math.min(1, val / totalCellsY));
+      onUpdatePosition(selectedMember.id, curX, clampedRatio);
+    }
+  };
+
+  const applyOffset = (deltaXRatio: number, deltaYRatio: number) => {
+    if (!onUpdatePosition) return;
+    onBeforeDragStart?.();
+    const newX = Math.max(0, Math.min(1, curX + deltaXRatio));
+    const newY = Math.max(0, Math.min(1, curY + deltaYRatio));
+    onUpdatePosition(selectedMember.id, newX, newY);
+  };
+
+  // 選択中の部員に適用される指定の解決
+  let resolvedInstText = "";
+  if (currentSet && setInstructions && setInstructions[currentSet.id]) {
+    const insts = setInstructions[currentSet.id];
+    // 1. 個人指定
+    const indInst = insts.find(
+      (i: any) => i.targetType === "individual" && i.targetValue.split(",").includes(String(selectedMember.id))
+    );
+    if (indInst) {
+      resolvedInstText = indInst.instructionText;
+    } else {
+      // 2. グループ指定
+      const grpInst = insts.find((i: any) => {
+        if (i.targetType !== "group") return false;
+        const grp = (memberGroups || []).find((g: any) => g.id === i.targetValue || g.name === i.targetValue);
+        return grp ? grp.memberIds.includes(selectedMember.id) : false;
+      });
+      if (grpInst) {
+        resolvedInstText = grpInst.instructionText;
+      } else {
+        // 3. パート指定
+        const insInst = insts.find(
+          (i: any) => i.targetType === "instrument" && i.targetValue === selectedMember.instrument
+        );
+        if (insInst) {
+          resolvedInstText = insInst.instructionText;
+        } else {
+          // 4. 全員指定
+          const allInst = insts.find((i: any) => i.targetType === "all");
+          if (allInst) resolvedInstText = allInst.instructionText;
+        }
+      }
+    }
+  }
+
+  if (resolvedInstText) {
+    const xVal = memberVariables[selectedMember.id] ?? 0;
+    resolvedInstText = evaluateInstructionFormula(resolvedInstText, xVal);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 p-2.5 bg-white rounded-xl border border-slate-200 text-xs text-slate-700 shadow-md transition-all">
+      {/* 1. 部員情報 header */}
+      {(() => {
+        const selLabel = getEffectiveMemberLabel(selectedMember, members, memberCustomLabels);
+        return (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-100 pb-1.5">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-blue-600 shrink-0" />
+              <span className="font-semibold text-slate-500">選択中の部員:</span>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="w-3 h-3 rounded-full shrink-0"
+                  style={{ backgroundColor: selectedMember.color || "#3b82f6" }}
+                />
+                {selLabel && (
+                  <span className="font-mono font-bold text-xs text-slate-900">
+                    {selLabel}
+                  </span>
+                )}
+                {selectedMember.name && selectedMember.name !== selLabel && (
+                  <span className="font-mono font-bold text-xs text-slate-900">
+                    {selectedMember.name}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 2. 座標打ち込み フォーム (Grid X/Y) & 指定 */}
+      <div className="flex flex-wrap items-center gap-4 font-mono text-xs">
+        {/* グリッドマス目座標 */}
+        <div className="flex items-center gap-2">
+          <span className="font-sans font-bold text-slate-600 text-[11px]">座標:</span>
+          <div className="flex items-center gap-1">
+            <label className="text-blue-600 font-bold text-xs">X:</label>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max={bX}
+              value={gridXStr}
+              onFocus={() => {
+                setIsFocusedGridX(true);
+                onBeforeDragStart?.();
+              }}
+              onBlur={() => setIsFocusedGridX(false)}
+              onChange={(e) => handleGridXChange(e.target.value)}
+              className="w-16 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 font-bold text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-1 ml-1.5">
+            <label className="text-blue-600 font-bold text-xs">Y:</label>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max={bY}
+              value={gridYStr}
+              onFocus={() => {
+                setIsFocusedGridY(true);
+                onBeforeDragStart?.();
+              }}
+              onBlur={() => setIsFocusedGridY(false)}
+              onChange={(e) => handleGridYChange(e.target.value)}
+              className="w-16 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 font-bold text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        {/* 適用される指定 */}
+        <div className="flex items-center gap-1.5">
+          <span className="font-sans font-bold text-blue-700 text-[11px]">指定:</span>
+          <span className="font-bold text-xs text-slate-800 font-mono">
+            {resolvedInstText || ""}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function MarchingField({
@@ -175,7 +422,7 @@ export default function MarchingField({
   gridLineColor = "rgba(255,255,255,0.3)",
   gridLineWidth = 1.5,
   gridLineStyle = "solid",
-  subGridLineStyle = "dashed",
+  subGridLineStyle = "solid",
   showGridLines = true,
   customMarkers = [],
   selectedCustomMarkerId = null,
@@ -185,6 +432,11 @@ export default function MarchingField({
   onUpdateMarker,
   setInstructions,
   memberVariables = {},
+  memberGroups = [],
+  memberGroupsBySet = {},
+  memberVariablesBySet = {},
+  memberCustomLabels = {},
+  showMemberLabels = true,
 
   isAlignActive = false,
   alignType = "line",
@@ -211,7 +463,14 @@ export default function MarchingField({
   subdivisionsX,
   subdivisionsY,
   snapToGrid = true,
+  snapMode,
+  selectedMemberIds = [],
+  onSelectMembers,
+  onUpdatePositions,
+  onBeforeDragStart,
   markerColor,
+  enableCollisionDetection: propEnableCollisionDetection,
+  onToggleCollisionDetection,
 }: MarchingFieldProps) {
   const fieldRef = useRef<HTMLDivElement>(null);
   const [zoomScale, setZoomScale] = useState<number>(1.0);
@@ -224,27 +483,118 @@ export default function MarchingField({
   const subY = subdivisionsY || 10;
   const totalCellsX = bX * subX;
   const totalCellsY = bY * subY;
-  
+
+  const effectiveSelectedMemberIds = selectedMemberIds.length > 0
+    ? selectedMemberIds
+    : selectedMemberId !== null
+    ? [selectedMemberId]
+    : [];
+
   const mainStrokeDash = gridLineStyle === "dashed" ? "6,4" : gridLineStyle === "dotted" ? "2,3" : undefined;
   const subStrokeDash = subGridLineStyle === "dashed" ? "4,4" : subGridLineStyle === "dotted" ? "1,3" : undefined;
-  
+
   // ドラッグ状態
   const [draggedMemberId, setDraggedMemberId] = useState<number | null>(null);
+  const [draggedInitialPositions, setDraggedInitialPositions] = useState<{ memberId: number; x: number; y: number }[]>([]);
+  const [dragStartPoint, setDragStartPoint] = useState<{ x: number; y: number } | null>(null);
+
   const [draggedMarkerId, setDraggedMarkerId] = useState<string | null>(null);
   const [draggedAlignPoint, setDraggedAlignPoint] = useState<"A" | "B" | "Center" | "ArcStart" | "ArcEnd" | "ArcMid" | "CircleRadius" | null>(null);
 
-  // マーカーのリスト。カスタムテンプレートがある場合はそちらを優先
+  // 衝突検知 ON/OFF ステート
+  const [localEnableCollisionDetection, setLocalEnableCollisionDetection] = useState<boolean>(true);
+  const enableCollisionDetection = propEnableCollisionDetection !== undefined ? propEnableCollisionDetection : localEnableCollisionDetection;
+  const toggleCollisionDetection = onToggleCollisionDetection || (() => setLocalEnableCollisionDetection(prev => !prev));
+
+  // マーカーのリスト
   const displayMarkers: CustomMarker[] = customMarkers || [];
+
+  // スナップ計算 (フィールド座標単位: X from 0 to bX, Y from 0 to bY)
+  const calcSnapCoords = (rawX: number, rawY: number) => {
+    let clampedX = Math.max(0, Math.min(1, rawX));
+    let clampedY = Math.max(0, Math.min(1, rawY));
+    const isSnapOn = snapToGrid && snapMode !== "none";
+
+    // フィールド座標値 (ブロック単位 0 ~ bX / 0 ~ bY)
+    const fieldX = clampedX * bX;
+    const fieldY = clampedY * bY;
+
+    let snappedFieldX: number;
+    let snappedFieldY: number;
+
+    if (isSnapOn) {
+      // スナップ ON: ブロック線の交点とその中点にスナップ (フィールド座標で 0.5 刻み: 0, 0.5, 1.0, 1.5, ...)
+      snappedFieldX = Math.round(fieldX * 2) / 2;
+      snappedFieldY = Math.round(fieldY * 2) / 2;
+    } else {
+      // スナップ OFF: フィールド座標で 0.05 刻み (0, 0.05, 0.10, 0.15, 0.20, ...)
+      snappedFieldX = Math.round(fieldX * 20) / 20;
+      snappedFieldY = Math.round(fieldY * 20) / 20;
+    }
+
+    const x = Math.max(0, Math.min(1, snappedFieldX / bX));
+    const y = Math.max(0, Math.min(1, snappedFieldY / bY));
+
+    return { x, y };
+  };
 
   const handleMouseDownMember = (memberId: number, e: React.MouseEvent) => {
     e.preventDefault();
-    if (isPlaying || isDesignMode) return;
+    e.stopPropagation();
+    if (isPlaying || isDesignMode || !currentSet) return;
+
+    if (onBeforeDragStart) {
+      onBeforeDragStart();
+    }
+
+    let newSelected = [...effectiveSelectedMemberIds];
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      if (newSelected.includes(memberId)) {
+        newSelected = newSelected.filter((id) => id !== memberId);
+      } else {
+        newSelected.push(memberId);
+      }
+    } else {
+      if (!newSelected.includes(memberId)) {
+        newSelected = [memberId];
+      }
+    }
+
+    if (onSelectMembers) {
+      onSelectMembers(newSelected);
+    } else {
+      onSelectMember(memberId);
+    }
+
     setDraggedMemberId(memberId);
-    onSelectMember(memberId);
+
+    // 掴んだ位置の記録
+    if (fieldRef.current) {
+      const rect = fieldRef.current.getBoundingClientRect();
+      const rawX = (e.clientX - rect.left) / rect.width;
+      const rawY = 1 - (e.clientY - rect.top) / rect.height;
+      setDragStartPoint({ x: rawX, y: rawY });
+
+      const initPosList = newSelected.map((mId) => {
+        const p = currentSet.positions.find((pos) => pos.memberId === mId);
+        return { memberId: mId, x: p ? p.x : 0.5, y: p ? p.y : 0.5 };
+      });
+      setDraggedInitialPositions(initPosList);
+    }
+  };
+
+  const handleMouseDownField = (e: React.MouseEvent) => {
+    if (isPlaying || isDesignMode || !fieldRef.current) return;
+
+    if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (onSelectMembers) onSelectMembers([]);
+      onSelectMember(null);
+    }
   };
 
   const handleMouseDownMarker = (markerId: string, e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!isDesignMode) return;
     setDraggedMarkerId(markerId);
     if (onSelectCustomMarker) {
@@ -256,26 +606,35 @@ export default function MarchingField({
     if (!fieldRef.current) return;
     const rect = fieldRef.current.getBoundingClientRect();
 
-    let rawX = (e.clientX - rect.left) / rect.width;
-    let rawY = (e.clientY - rect.top) / rect.height;
+    const rawX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    // 左下(0,0)にするため Y = 1 - top_ratio
+    const rawY = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / rect.height));
 
-    rawX = Math.max(0, Math.min(1, rawX));
-    rawY = Math.max(0, Math.min(1, rawY));
+    const { x, y } = calcSnapCoords(rawX, rawY);
 
-    let x = rawX;
-    let y = rawY;
+    if (draggedMemberId !== null && dragStartPoint && draggedInitialPositions.length > 0) {
+      const grabbedInit = draggedInitialPositions.find((p) => p.memberId === draggedMemberId);
+      if (!grabbedInit) return;
 
-    if (snapToGrid) {
-      x = Math.round(x * totalCellsX) / totalCellsX;
-      y = Math.round(y * totalCellsY) / totalCellsY;
-    } else {
-      const snapValue = 0.005; // 1歩の1/2〜1/4単位で微細スナップ
-      x = Math.round(x / snapValue) * snapValue;
-      y = Math.round(y / snapValue) * snapValue;
-    }
+      const dx = x - grabbedInit.x;
+      const dy = y - grabbedInit.y;
 
-    if (draggedMemberId !== null) {
-      onUpdatePosition(draggedMemberId, x, y);
+      const updates = draggedInitialPositions.map((init) => {
+        let nx = init.x + dx;
+        let ny = init.y + dy;
+
+        // 個別スナップまたは枠内ガード
+        nx = Math.max(0, Math.min(1, nx));
+        ny = Math.max(0, Math.min(1, ny));
+
+        return { memberId: init.memberId, x: nx, y: ny };
+      });
+
+      if (onUpdatePositions) {
+        onUpdatePositions(updates);
+      } else {
+        updates.forEach((u) => onUpdatePosition(u.memberId, u.x, u.y));
+      }
     } else if (draggedMarkerId !== null && onUpdateMarker) {
       onUpdateMarker(draggedMarkerId, x, y);
     } else if (draggedAlignPoint === "A" && onUpdateAlignPointA) {
@@ -290,13 +649,13 @@ export default function MarchingField({
       const center = alignPointCenter || { x: 0.5, y: 0.5 };
       const dist = Math.abs(rawX - center.x);
       if (onUpdateAlignRadius && dist > 0.01) onUpdateAlignRadius(Math.max(0.05, Math.min(0.8, dist)));
-    } else if (draggedAlignPoint === "ArcStart" || draggedAlignPoint === "ArcEnd") {
-      // old handlers
     }
   };
 
   const handleMouseUp = () => {
     setDraggedMemberId(null);
+    setDraggedInitialPositions([]);
+    setDragStartPoint(null);
     setDraggedMarkerId(null);
     setDraggedAlignPoint(null);
   };
@@ -324,17 +683,7 @@ export default function MarchingField({
     rawX = Math.max(0, Math.min(1, rawX));
     rawY = Math.max(0, Math.min(1, rawY));
 
-    let x = rawX;
-    let y = rawY;
-
-    if (snapToGrid) {
-      x = Math.round(x * totalCellsX) / totalCellsX;
-      y = Math.round(y * totalCellsY) / totalCellsY;
-    } else {
-      const snapValue = 0.005;
-      x = Math.round(x / snapValue) * snapValue;
-      y = Math.round(y / snapValue) * snapValue;
-    }
+    const { x, y } = calcSnapCoords(rawX, rawY);
 
     if (draggedMemberId !== null) {
       onUpdatePosition(draggedMemberId, x, y);
@@ -408,6 +757,9 @@ export default function MarchingField({
         // セット指示書の取得
         let text = "";
         const targetSetId = prevSet ? safeCurrentSet.id : (nextSet?.id || safeCurrentSet.id);
+        const currentSetGroups = (memberGroupsBySet && memberGroupsBySet[targetSetId]) || memberGroups || [];
+        const currentSetVariables = (memberVariablesBySet && memberVariablesBySet[targetSetId]) || memberVariables || {};
+
         if (setInstructions && setInstructions[targetSetId]) {
           const insts = setInstructions[targetSetId];
           const indInst = insts.find(
@@ -416,20 +768,29 @@ export default function MarchingField({
           if (indInst) {
             text = indInst.instructionText;
           } else {
-            const insInst = insts.find(
-              (i: any) => i.targetType === "instrument" && i.targetValue === m.instrument
-            );
-            if (insInst) {
-              text = insInst.instructionText;
+            const groupInst = insts.find((i: any) => {
+              if (i.targetType !== "group") return false;
+              const grp = currentSetGroups.find((g: any) => g.id === i.targetValue || g.name === i.targetValue);
+              return grp ? grp.memberIds.includes(m.id) : false;
+            });
+            if (groupInst) {
+              text = groupInst.instructionText;
             } else {
-              const allInst = insts.find((i: any) => i.targetType === "all");
-              if (allInst) text = allInst.instructionText;
+              const insInst = insts.find(
+                (i: any) => i.targetType === "instrument" && i.targetValue === m.instrument
+              );
+              if (insInst) {
+                text = insInst.instructionText;
+              } else {
+                const allInst = insts.find((i: any) => i.targetType === "all");
+                if (allInst) text = allInst.instructionText;
+              }
             }
           }
         }
 
         // 変数xの解決
-        let xVal = memberVariables[m.id] ?? 0;
+        let xVal = currentSetVariables[m.id] ?? memberVariables[m.id] ?? 0;
         // もし指定テキストに x/X が使われていて、メンバー変数 x が未割り当て(0)の場合、セットカウント数の中間値をデフォ補正
         if (/[xXｘＸ]/.test(text) && xVal === 0 && counts > 0) {
           xVal = Math.round(counts / 2);
@@ -619,7 +980,7 @@ export default function MarchingField({
     isSevere: boolean;
   }[] = [];
 
-  if (dots.length > 1) {
+  if (enableCollisionDetection && dots.length > 1) {
     for (let i = 0; i < dots.length; i++) {
       for (let j = i + 1; j < dots.length; j++) {
         const d1 = dots[i];
@@ -658,6 +1019,7 @@ export default function MarchingField({
   const selectedCurPos = selectedMemberId && currentSet
     ? currentSet.positions.find((p) => p.memberId === selectedMemberId) 
     : null;
+  const selectedMember = selectedMemberId ? members.find((m) => m.id === selectedMemberId) || null : null;
 
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -706,48 +1068,46 @@ export default function MarchingField({
   }, []);
 
   return (
-    <div className="flex flex-col gap-3 w-full">
-      {/* ズーム / 縮小コントロールツールバー */}
-      <div className="flex flex-wrap items-center gap-1.5 justify-end text-xs text-slate-500 font-medium select-none">
-        <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md font-mono font-bold border border-slate-200 shadow-sm mr-1">
-          ズーム: {Math.round(zoomScale * 100)}%
-        </span>
-        <button
-          type="button"
-          onClick={() => setZoomScale(prev => Math.max(0.3, Number((prev - 0.1).toFixed(2))))}
-          className="p-1 px-2.5 bg-white border border-slate-200 rounded shadow hover:bg-slate-50 transition font-bold text-slate-700 hover:text-blue-600"
-          title="縮小 (ズームアウト)"
-        >
-          - 縮小
-        </button>
-        <button
-          type="button"
-          onClick={() => setZoomScale(prev => Math.min(3.0, Number((prev + 0.1).toFixed(2))))}
-          className="p-1 px-2.5 bg-white border border-slate-200 rounded shadow hover:bg-slate-50 transition font-bold text-slate-700 hover:text-blue-600"
-          title="拡大 (ズームイン)"
-        >
-          + 拡大
-        </button>
-        <div className="h-4 w-px bg-slate-300 mx-0.5" />
-        <button
-          type="button"
-          onClick={() => setZoomScale(1.0)}
-          className={`px-2.5 py-1 border rounded text-xs font-bold transition ${
-            zoomScale === 1.0 ? "bg-blue-50 border-blue-400 text-blue-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-          }`}
-          title="100% (標準表示)"
-        >
-          100% (標準)
-        </button>
-      </div>
-
-      {/* スクロール可能コンテナ (ズーム・縮小対応・作業エリア拡大) */}
+    <div className="flex flex-col gap-2 w-full flex-1">
+      {/* スクロール可能コンテナ (ズーム対応・作業エリア) */}
       <div 
-        className="w-full overflow-auto max-h-[85vh] border border-slate-300 rounded-xl bg-slate-900/5 p-2 shadow-inner"
+        className="w-full overflow-auto relative border border-slate-300/80 rounded-2xl bg-slate-900/10 p-2 shadow-inner min-h-[560px] flex-1"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMoveLocal}
         onTouchEnd={handleTouchEnd}
       >
+        {/* 右下フローティング (キャンバス上に浮遊) ズームコントロール */}
+        <div className="sticky bottom-3 right-3 float-right z-40 flex items-center gap-1 bg-slate-900/90 backdrop-blur-md text-white px-2.5 py-1.5 rounded-xl border border-slate-700/80 shadow-2xl select-none my-1 ml-auto">
+          <span className="text-[11px] font-mono font-bold px-1 text-slate-300">
+            {Math.round(zoomScale * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => setZoomScale(prev => Math.max(0.3, Number((prev - 0.1).toFixed(2))))}
+            className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-200 hover:text-blue-400 transition cursor-pointer"
+            title="縮小 (ズームアウト)"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoomScale(prev => Math.min(3.0, Number((prev + 0.1).toFixed(2))))}
+            className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-200 hover:text-blue-400 transition cursor-pointer"
+            title="拡大 (ズームイン)"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoomScale(1.0)}
+            className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
+              zoomScale === 1.0 ? "bg-blue-600 text-white shadow-xs" : "hover:bg-slate-800 text-slate-300"
+            }`}
+            title="100% (標準表示)"
+          >
+            100%
+          </button>
+        </div>
         <div
           style={{
             width: `${zoomScale * 100}%`,
@@ -760,6 +1120,7 @@ export default function MarchingField({
           <div
             id="marching-field-canvas"
             ref={fieldRef}
+            onMouseDown={handleMouseDownField}
             className="relative w-full rounded-xl overflow-hidden shadow-xl border border-slate-400 select-none cursor-crosshair transition-all"
             style={{ 
               aspectRatio: `${totalCellsX}/${totalCellsY}`,
@@ -784,7 +1145,6 @@ export default function MarchingField({
                       {collisions.map((c, idx) => (
                         <span key={idx} className="mr-3 inline-block">
                           <span className="font-bold text-white">{c.m1Name}</span> ↔ <span className="font-bold text-white">{c.m2Name}</span>
-                          <span className="text-red-200 ml-1">({c.dist.toFixed(1)}歩)</span>
                           {idx < collisions.length - 1 ? " / " : ""}
                         </span>
                       ))}
@@ -858,7 +1218,7 @@ export default function MarchingField({
         <div className="absolute inset-y-0 left-0 w-[2px] bg-white/50 pointer-events-none" />
         <div className="absolute inset-y-0 right-0 w-[2px] bg-white/50 pointer-events-none" />
 
-        {/* マーカーのレンダリング (CSSパーセンテージによる完璧な絶対配置) */}
+        {/* マーカーのレンダリング (CSSパーセンテージによる計算) */}
         {displayMarkers.map((mark, idx) => {
           const shapeToRender = mark.shape || markingShape || "cross";
           const colorToUse = mark.color || markerColor;
@@ -868,7 +1228,7 @@ export default function MarchingField({
               className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center justify-center z-20"
               style={{
                 left: `${mark.x * 100}%`,
-                top: `${mark.y * 100}%`,
+                top: `${(1 - mark.y) * 100}%`,
                 width: `${markerSize}px`,
                 height: `${markerSize}px`,
               }}
@@ -894,7 +1254,7 @@ export default function MarchingField({
               className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center cursor-grab active:cursor-grabbing hover:scale-125 z-40 transition-transform"
               style={{
                 left: `${mark.x * 100}%`,
-                top: `${mark.y * 100}%`,
+                top: `${(1 - mark.y) * 100}%`,
               }}
               onMouseDown={(e) => handleMouseDownMarker(mark.id, e)}
               onTouchStart={(e) => {
@@ -923,7 +1283,7 @@ export default function MarchingField({
           );
         })}
 
-        {/* ゴースト表示 (全メンバーの前セット位置: トゲトゲ感を無くした滑らかなソフトドット) */}
+        {/* ゴースト表示 */}
         {!isDesignMode && showGhost && prevSet && !isPlaying && (
           <div className="absolute inset-0 pointer-events-none">
             {members.map((m) => {
@@ -933,10 +1293,10 @@ export default function MarchingField({
               return (
                 <div
                   key={`ghost-${m.id}`}
-                  className="absolute w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 opacity-50 shadow-sm ring-1 ring-black/20"
+                  className="absolute w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 opacity-50"
                   style={{
                     left: `${prevPos.x * 100}%`,
-                    top: `${prevPos.y * 100}%`,
+                    top: `${(1 - prevPos.y) * 100}%`,
                     backgroundColor: m.color,
                   }}
                 />
@@ -979,15 +1339,15 @@ export default function MarchingField({
 
               const distance = Math.hypot(curPos.x - prevPos.x, curPos.y - prevPos.y);
               if (distance < 0.01) return null;
-              if (m.id === selectedMemberId) return null;
+              if (effectiveSelectedMemberIds.includes(m.id)) return null;
 
               return (
                 <line
                   key={`line-all-${m.id}`}
                   x1={`${prevPos.x * 100}%`}
-                  y1={`${prevPos.y * 100}%`}
+                  y1={`${(1 - prevPos.y) * 100}%`}
                   x2={`${curPos.x * 100}%`}
-                  y2={`${curPos.y * 100}%`}
+                  y2={`${(1 - curPos.y) * 100}%`}
                   stroke="rgba(255, 255, 255, 0.25)"
                   strokeWidth="1"
                   strokeDasharray="2,2"
@@ -1000,9 +1360,9 @@ export default function MarchingField({
             {selectedPrevPos && selectedCurPos && (
               <line
                 x1={`${selectedPrevPos.x * 100}%`}
-                y1={`${selectedPrevPos.y * 100}%`}
+                y1={`${(1 - selectedPrevPos.y) * 100}%`}
                 x2={`${selectedCurPos.x * 100}%`}
-                y2={`${selectedCurPos.y * 100}%`}
+                y2={`${(1 - selectedCurPos.y) * 100}%`}
                 stroke="#ef4444"
                 strokeWidth="2.5"
                 markerEnd="url(#arrowhead)"
@@ -1016,26 +1376,26 @@ export default function MarchingField({
           const m = members.find((member) => member.id === dot.memberId);
           if (!m) return null;
 
-          const isSelected = dot.memberId === selectedMemberId;
+          const isSelected = effectiveSelectedMemberIds.includes(dot.memberId);
           const isAlignSelected = isAlignActive && alignSelectedMemberIds.includes(dot.memberId);
+          const dotLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
 
           return (
             <div
               key={dot.memberId}
               id={`member-dot-${dot.memberId}`}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing shadow-md font-sans ${
+              className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing font-sans select-none ${
                 isPlaying || dot.isInterp ? "transition-none" : "transition-all duration-150"
               } ${
-                isAlignSelected
-                  ? "w-6 h-6 ring-4 ring-emerald-400 ring-offset-1 ring-offset-[#1e4620] z-25 scale-105"
-                  : isSelected
-                  ? "w-7 h-7 ring-4 ring-white ring-offset-2 ring-offset-[#1e4620] scale-110 z-30"
-                  : "w-3.5 h-3.5 hover:scale-125 z-10"
+                isSelected
+                  ? "z-30 scale-110"
+                  : isAlignSelected
+                  ? "z-25 scale-110"
+                  : "hover:scale-110 z-10"
               }`}
               style={{
                 left: `${dot.x * 100}%`,
-                top: `${dot.y * 100}%`,
-                backgroundColor: m.color,
+                top: `${(1 - dot.y) * 100}%`,
               }}
               onMouseDown={(e) => {
                 if (isAlignActive && onToggleAlignMemberId) {
@@ -1054,9 +1414,32 @@ export default function MarchingField({
                 }
               }}
             >
-              {/* Dot content remains clean without text */}
               {isSelected && (
-                <div className="absolute inset-0 rounded-full border-2 border-white animate-ping opacity-35" />
+                <div className="absolute top-0 w-3 h-3 rounded-full border border-blue-400 animate-ping opacity-60 pointer-events-none" />
+              )}
+
+              {/* 部員ドット（丸） */}
+              <div
+                className={`rounded-full shrink-0 transition-all duration-150 ${
+                  isAlignSelected
+                    ? "w-2.5 h-2.5 ring-2 ring-emerald-400 ring-offset-1 ring-offset-slate-900"
+                    : isSelected
+                    ? "w-2.5 h-2.5 ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900"
+                    : "w-2 h-2 border border-black/20"
+                }`}
+                style={{ backgroundColor: m.color || "#ffffff" }}
+              />
+
+              {/* 表示名がオンの場合、ドットの下部に小さめの字で表示（座標ズレ防止のため absolute 配置、色は黒色、ドットに近づける） */}
+              {showMemberLabels && (
+                <span
+                  className="absolute top-full left-1/2 -translate-x-1/2 font-mono font-bold text-[8.5px] sm:text-[9.5px] leading-tight select-none pointer-events-none whitespace-nowrap tracking-tight -mt-0.5 text-black"
+                  style={{
+                    color: "#000000",
+                  }}
+                >
+                  {dotLabel}
+                </span>
               )}
             </div>
           );
@@ -1407,21 +1790,24 @@ export default function MarchingField({
         </div>
       </div>
 
-      {/* 座標ステータス表示 */}
-      {selectedMemberId && !isPlaying && !isDesignMode && (
-        <div className="flex items-center justify-between px-4 py-3 bg-white rounded-lg border border-slate-200 text-xs text-slate-600 shadow-sm">
-          <div className="flex items-center gap-1.5">
-            <Move className="w-4 h-4 text-blue-600" />
-            <span className="font-medium text-slate-500">選択中の部員:</span>
-            <strong className="text-slate-800 font-semibold">
-              {members.find((m) => m.id === selectedMemberId)?.name}
-            </strong>
-          </div>
-          <div className="font-mono text-xs text-slate-500 bg-slate-50 px-2.5 py-1 rounded border border-slate-100">
-            X: <span className="text-slate-800 font-semibold">{(selectedCurPos?.x || 0.5).toFixed(3)}</span>, Y:{" "}
-            <span className="text-slate-800 font-semibold">{(selectedCurPos?.y || 0.5).toFixed(3)}</span>
-          </div>
-        </div>
+      {/* 座標ステータス・直接調整フォーム */}
+      {selectedMember && !isPlaying && !isDesignMode && (
+        <SelectedMemberCoordinatePanel
+          selectedMember={selectedMember}
+          selectedCurPos={selectedCurPos}
+          bX={bX}
+          bY={bY}
+          totalCellsX={totalCellsX}
+          totalCellsY={totalCellsY}
+          onUpdatePosition={onUpdatePosition}
+          onBeforeDragStart={onBeforeDragStart}
+          setInstructions={setInstructions}
+          currentSet={currentSet}
+          memberGroups={memberGroups}
+          memberVariables={memberVariables}
+          memberCustomLabels={memberCustomLabels}
+          members={members}
+        />
       )}
     </div>
   );

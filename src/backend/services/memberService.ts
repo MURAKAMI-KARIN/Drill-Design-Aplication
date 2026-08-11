@@ -33,4 +33,8 @@ export const memberService = {
   async deleteMember(id: number) {
     return memberRepository.delete(id);
   },
+
+  async deleteAllMembers() {
+    return memberRepository.deleteAll();
+  },
 };

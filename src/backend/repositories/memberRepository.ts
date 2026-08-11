@@ -3,7 +3,7 @@ import { prisma } from "../db/prisma";
 export const memberRepository = {
   async findAll() {
     return prisma.member.findMany({
-      orderBy: { name: "asc" },
+      orderBy: { id: "asc" },
     });
   },
 
@@ -18,9 +18,21 @@ export const memberRepository = {
   },
 
   async delete(id: number) {
-    return prisma.member.delete({
-      where: { id },
+    await prisma.position.deleteMany({
+      where: { memberId: id },
     });
+    try {
+      return await prisma.member.delete({
+        where: { id },
+      });
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async deleteAll() {
+    await prisma.position.deleteMany({});
+    return prisma.member.deleteMany({});
   },
 
   async update(id: number, data: { name?: string; instrument?: string; color?: string }) {

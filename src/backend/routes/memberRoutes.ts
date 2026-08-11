@@ -31,6 +31,17 @@ router.post("/", async (req, res) => {
   }
 });
 
+// DELETE /api/members/all - 全部員削除
+router.delete("/all", async (req, res) => {
+  try {
+    await memberService.deleteAllMembers();
+    res.json({ success: true, message: "All members deleted successfully" });
+  } catch (error) {
+    console.error("DELETE /api/members/all error:", error);
+    res.status(500).json({ error: "Failed to delete all members" });
+  }
+});
+
 // PUT /api/members/:id - 部員更新
 router.put("/:id", async (req, res) => {
   try {

@@ -71,9 +71,24 @@ export const formationRepository = {
   },
 
   async delete(id: number) {
-    return prisma.formation.delete({
-      where: { id },
-    });
+    try {
+      const sets = await prisma.set.findMany({ where: { formationId: id } });
+      const setIds = sets.map((s) => s.id);
+      if (setIds.length > 0) {
+        await prisma.position.deleteMany({
+          where: { setId: { in: setIds } },
+        });
+        await prisma.set.deleteMany({
+          where: { formationId: id },
+        });
+      }
+      return await prisma.formation.delete({
+        where: { id },
+      });
+    } catch (e) {
+      console.error("Failed to delete formation in repository:", e);
+      return null;
+    }
   },
 
   async update(id: number, data: {

@@ -13,6 +13,7 @@ export interface Set {
   counts: number;
   bpm?: number | null;
   positions: Position[];
+  memberGroups?: MemberGroup[];
   createdAt?: string;
 }
 
@@ -21,6 +22,7 @@ export interface Member {
   name: string;
   instrument: string;
   color: string;
+  label?: string;
   variableX?: number; // ユーザーが指定する任意変数 x
   createdAt?: string;
 }
@@ -34,8 +36,8 @@ export interface MemberGroup {
 
 export interface SetInstruction {
   id: string;
-  targetType: "all" | "instrument" | "individual";
-  targetValue: string; // e.g. "Trumpet" or "m1,m2"
+  targetType: "all" | "instrument" | "group" | "individual";
+  targetValue: string; // e.g. "Trumpet" or "m1,m2" or groupId
   instructionText: string; // e.g. "Build 8 Halt 8" or "レ右4 C正面"
 }
 

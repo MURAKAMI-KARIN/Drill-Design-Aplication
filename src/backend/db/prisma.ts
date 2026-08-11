@@ -132,7 +132,7 @@ export async function seedDefaultDataIfEmpty() {
       { name: "Trumpet 2", instrument: "Trumpet", color: "#EF4444" },
       { name: "Trombone 1", instrument: "Trombone", color: "#3B82F6" },
       { name: "Trombone 2", instrument: "Trombone", color: "#3B82F6" },
-      { name: "Tuba 1", instrument: "Tuba", color: "#10B981" },
+      { name: "Sousaphone 1", instrument: "Sousaphone", color: "#10B981" },
       { name: "Snare 1", instrument: "Percussion", color: "#6366F1" },
     ];
 
