@@ -1071,7 +1071,7 @@ export default function MarchingField({
     <div className="flex flex-col gap-2 w-full flex-1">
       {/* スクロール可能コンテナ (ズーム対応・作業エリア) */}
       <div 
-        className="w-full overflow-auto relative border border-slate-300/80 rounded-2xl bg-slate-900/10 p-2 shadow-inner min-h-[560px] flex-1"
+        className="w-full overflow-auto relative border border-slate-300/80 rounded-none bg-slate-900/10 p-2 shadow-inner min-h-[560px] flex-1"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMoveLocal}
         onTouchEnd={handleTouchEnd}
@@ -1121,7 +1121,7 @@ export default function MarchingField({
             id="marching-field-canvas"
             ref={fieldRef}
             onMouseDown={handleMouseDownField}
-            className="relative w-full rounded-xl overflow-hidden shadow-xl border border-slate-400 select-none cursor-crosshair transition-all"
+            className="relative w-full rounded-none overflow-hidden shadow-xl border border-slate-400 select-none cursor-crosshair transition-all"
             style={{ 
               aspectRatio: `${totalCellsX}/${totalCellsY}`,
               backgroundColor: backgroundColor 
@@ -1420,12 +1420,12 @@ export default function MarchingField({
 
               {/* 部員ドット（丸） */}
               <div
-                className={`rounded-full shrink-0 transition-all duration-150 ${
+                className={`rounded-full shrink-0 transition-all duration-150 w-1.5 h-1.5 ${
                   isAlignSelected
-                    ? "w-2.5 h-2.5 ring-2 ring-emerald-400 ring-offset-1 ring-offset-slate-900"
+                    ? "ring-2 ring-emerald-400 ring-offset-1 ring-offset-slate-900"
                     : isSelected
-                    ? "w-2.5 h-2.5 ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900"
-                    : "w-2 h-2 border border-black/20"
+                    ? "ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900"
+                    : "border border-black/20"
                 }`}
                 style={{ backgroundColor: m.color || "#ffffff" }}
               />
@@ -1463,9 +1463,9 @@ export default function MarchingField({
                 <>
                   <line
                     x1={ptA.x * totalCellsX * 10}
-                    y1={ptA.y * totalCellsY * 10}
+                    y1={(1 - ptA.y) * totalCellsY * 10}
                     x2={ptB.x * totalCellsX * 10}
-                    y2={ptB.y * totalCellsY * 10}
+                    y2={(1 - ptB.y) * totalCellsY * 10}
                     stroke="#3b82f6"
                     strokeWidth="3"
                     strokeDasharray="6,4"
@@ -1474,7 +1474,7 @@ export default function MarchingField({
                     const count = selectedIds.length;
                     const t = count === 1 ? 0.5 : idx / (count - 1);
                     const px = (ptA.x + (ptB.x - ptA.x) * t) * totalCellsX * 10;
-                    const py = (ptA.y + (ptB.y - ptA.y) * t) * totalCellsY * 10;
+                    const py = (1 - (ptA.y + (ptB.y - ptA.y) * t)) * totalCellsY * 10;
                     return (
                       <circle
                         key={`preview-line-${idx}`}
@@ -1495,7 +1495,7 @@ export default function MarchingField({
                 <>
                   <circle
                     cx={ptCenter.x * totalCellsX * 10}
-                    cy={ptCenter.y * totalCellsY * 10}
+                    cy={(1 - ptCenter.y) * totalCellsY * 10}
                     r={rad * totalCellsX * 10}
                     fill="none"
                     stroke="#3b82f6"
@@ -1504,9 +1504,10 @@ export default function MarchingField({
                   />
                   {selectedIds.length > 0 && selectedIds.map((_, idx) => {
                     const count = selectedIds.length;
-                    const angle = (2 * Math.PI * idx) / count - Math.PI / 2;
+                    // 12時方向から時計回り
+                    const angle = Math.PI / 2 - (2 * Math.PI * idx) / count;
                     const px = (ptCenter.x + rad * Math.cos(angle)) * totalCellsX * 10;
-                    const py = (ptCenter.y + rad * Math.sin(angle) * (totalCellsX / totalCellsY)) * totalCellsY * 10;
+                    const py = (1 - (ptCenter.y + rad * Math.sin(angle) * (totalCellsX / totalCellsY))) * totalCellsY * 10;
                     return (
                       <circle
                         key={`preview-circle-${idx}`}
@@ -1526,7 +1527,7 @@ export default function MarchingField({
               {alignType === "arc" && (
                 <>
                   <path
-                    d={`M ${(alignPointA?.x ?? 0.25) * totalCellsX * 10} ${(alignPointA?.y ?? 0.5) * totalCellsY * 10} Q ${(alignPointMid?.x ?? 0.5) * totalCellsX * 10} ${(alignPointMid?.y ?? 0.3) * totalCellsY * 10} ${(alignPointB?.x ?? 0.75) * totalCellsX * 10} ${(alignPointB?.y ?? 0.5) * totalCellsY * 10}`}
+                    d={`M ${(alignPointA?.x ?? 0.25) * totalCellsX * 10} ${(1 - (alignPointA?.y ?? 0.5)) * totalCellsY * 10} Q ${(alignPointMid?.x ?? 0.5) * totalCellsX * 10} ${(1 - (alignPointMid?.y ?? 0.3)) * totalCellsY * 10} ${(alignPointB?.x ?? 0.75) * totalCellsX * 10} ${(1 - (alignPointB?.y ?? 0.5)) * totalCellsY * 10}`}
                     fill="none"
                     stroke="#3b82f6"
                     strokeWidth="3"
@@ -1541,7 +1542,7 @@ export default function MarchingField({
                     const tx = (1 - t) * (1 - t) * ptA.x + 2 * (1 - t) * t * ptMid.x + t * t * ptB.x;
                     const ty = (1 - t) * (1 - t) * ptA.y + 2 * (1 - t) * t * ptMid.y + t * t * ptB.y;
                     const px = tx * totalCellsX * 10;
-                    const py = ty * totalCellsY * 10;
+                    const py = (1 - ty) * totalCellsY * 10;
                     return (
                       <circle
                         key={`preview-arc-${idx}`}
@@ -1585,15 +1586,6 @@ export default function MarchingField({
                     stroke="#ef4444"
                     strokeWidth={c.isSevere ? "3" : "2"}
                     strokeDasharray="4,2"
-                    className="animate-pulse"
-                  />
-                  <circle
-                    cx={midX}
-                    cy={midY}
-                    r={c.isSevere ? "8" : "6"}
-                    fill="#ef4444"
-                    opacity="0.8"
-                    className="animate-ping"
                   />
                   <circle
                     cx={midX}
@@ -1643,7 +1635,7 @@ export default function MarchingField({
                     className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-xs cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${(alignPointA?.x ?? 0.25) * 100}%`,
-                      top: `${(alignPointA?.y ?? 0.5) * 100}%`,
+                      top: `${(1 - (alignPointA?.y ?? 0.5)) * 100}%`,
                     }}
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -1660,7 +1652,7 @@ export default function MarchingField({
                     className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 bg-emerald-600 hover:bg-emerald-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-xs cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${(alignPointB?.x ?? 0.75) * 100}%`,
-                      top: `${(alignPointB?.y ?? 0.5) * 100}%`,
+                      top: `${(1 - (alignPointB?.y ?? 0.5)) * 100}%`,
                     }}
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -1683,7 +1675,7 @@ export default function MarchingField({
                     className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-xs cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${(alignPointA?.x ?? 0.25) * 100}%`,
-                      top: `${(alignPointA?.y ?? 0.5) * 100}%`,
+                      top: `${(1 - (alignPointA?.y ?? 0.5)) * 100}%`,
                     }}
                     title="端点1 (ドラッグで移動)"
                     onMouseDown={(e) => {
@@ -1703,7 +1695,7 @@ export default function MarchingField({
                     className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 bg-emerald-600 hover:bg-emerald-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-xs cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${(alignPointB?.x ?? 0.75) * 100}%`,
-                      top: `${(alignPointB?.y ?? 0.5) * 100}%`,
+                      top: `${(1 - (alignPointB?.y ?? 0.5)) * 100}%`,
                     }}
                     title="端点2 (ドラッグで移動)"
                     onMouseDown={(e) => {
@@ -1723,7 +1715,7 @@ export default function MarchingField({
                     className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 bg-amber-600 hover:bg-amber-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-[11px] cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${(alignPointMid?.x ?? 0.5) * 100}%`,
-                      top: `${(alignPointMid?.y ?? 0.3) * 100}%`,
+                      top: `${(1 - (alignPointMid?.y ?? 0.3)) * 100}%`,
                     }}
                     title="カーブ調整 (ドラッグでアーチを変形)"
                     onMouseDown={(e) => {
@@ -1747,7 +1739,7 @@ export default function MarchingField({
                     className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 bg-purple-600 hover:bg-purple-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-xs cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${ptCenter.x * 100}%`,
-                      top: `${ptCenter.y * 100}%`,
+                      top: `${(1 - ptCenter.y) * 100}%`,
                     }}
                     title="中心位置 (ドラッグで移動)"
                     onMouseDown={(e) => {
@@ -1767,7 +1759,7 @@ export default function MarchingField({
                     className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-500 border-2 border-white rounded-full flex items-center justify-center text-white font-bold text-xs cursor-move shadow-lg z-40 select-none"
                     style={{
                       left: `${circleRadPos.x * 100}%`,
-                      top: `${circleRadPos.y * 100}%`,
+                      top: `${(1 - circleRadPos.y) * 100}%`,
                     }}
                     title="円の半径 (ドラッグで調整)"
                     onMouseDown={(e) => {

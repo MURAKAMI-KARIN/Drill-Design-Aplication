@@ -5,6 +5,10 @@ import { execSync } from "child_process";
 
 const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
+const dbPath = isVercel
+  ? "/tmp/dev.db"
+  : path.join(process.cwd(), "prisma", "dev.db");
+
 if (isVercel) {
   process.env.DATABASE_URL = "file:/tmp/dev.db";
   try {
@@ -19,7 +23,7 @@ if (isVercel) {
     console.error("⚠️ Failed to copy dev.db to /tmp:", err);
   }
 } else if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "file:./dev.db";
+  process.env.DATABASE_URL = `file:${dbPath}`;
 }
 
 export const prisma = new PrismaClient();
@@ -29,10 +33,6 @@ let isResetting = false;
 export async function checkAndRecoverDatabase(): Promise<boolean> {
   if (isResetting) return true;
   try {
-    const dbPath = isVercel
-      ? "/tmp/dev.db"
-      : path.join(process.cwd(), "prisma", "dev.db");
-
     if (isVercel && !fs.existsSync(dbPath)) {
       const sourceDb = path.join(process.cwd(), "prisma", "dev.db");
       if (fs.existsSync(sourceDb)) {
@@ -42,16 +42,23 @@ export async function checkAndRecoverDatabase(): Promise<boolean> {
 
     const isEmptyFile = !fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0;
     if (isEmptyFile) {
-      if (!isVercel) {
-        throw new Error("Database file is missing or 0 bytes (uninitialized). Triggering schema push.");
-      }
+      throw new Error("Database file is missing or 0 bytes (uninitialized). Triggering schema push.");
     }
 
     // Attempt a lightweight read query to check database integrity
-    await prisma.$queryRawUnsafe("PRAGMA quick_check;");
+    const quickCheckResult = (await prisma.$queryRawUnsafe("PRAGMA quick_check;")) as any[];
+    if (
+      Array.isArray(quickCheckResult) &&
+      quickCheckResult[0] &&
+      quickCheckResult[0].quick_check &&
+      quickCheckResult[0].quick_check !== "ok"
+    ) {
+      throw new Error(`Database quick_check failed: ${quickCheckResult[0].quick_check}`);
+    }
+
     const count = await prisma.member.count();
     const formationCount = await prisma.formation.count();
-    
+
     // Auto-seed if database is completely empty
     if (count === 0 && formationCount === 0) {
       await seedDefaultDataIfEmpty();
@@ -67,51 +74,48 @@ export async function checkAndRecoverDatabase(): Promise<boolean> {
       " " +
       String(error?.meta?.table || "");
     console.warn("⚠️ Corrupted or uninitialized SQLite database detected:", errorStr);
-    
-    if (
-      !isVercel &&
-      (error?.code === "P2021" ||
-      error?.code === "P2022" ||
-      errorStr.includes("malformed") ||
-      errorStr.includes("disk image") ||
-      errorStr.includes("no such table") ||
-      errorStr.includes("does not exist") ||
-      errorStr.includes("P2021") ||
-      errorStr.includes("SqliteError") ||
-      errorStr.includes("unable to open database file") ||
-      errorStr.includes("uninitialized"))
-    ) {
-      isResetting = true;
+
+    isResetting = true;
+    try {
+      console.log("🔄 Recreating database and resetting schema...");
       try {
-        console.log("🔄 Recreating database and resetting schema...");
-        try {
-          await prisma.$disconnect();
-        } catch (_) {}
+        await prisma.$disconnect();
+      } catch (_) {}
 
-        const dbDir = path.join(process.cwd(), "prisma");
-        
-        // Remove corrupted files
-        ["dev.db", "dev.db-journal", "dev.db-wal", "dev.db-shm"].forEach((file) => {
-          const fp = path.join(dbDir, file);
-          if (fs.existsSync(fp)) {
-            try { fs.unlinkSync(fp); } catch (e) { console.error(`Failed to remove ${file}:`, e); }
+      const dbDir = isVercel ? "/tmp" : path.join(process.cwd(), "prisma");
+
+      // Remove corrupted files
+      ["dev.db", "dev.db-journal", "dev.db-wal", "dev.db-shm"].forEach((file) => {
+        const fp = path.join(dbDir, file);
+        if (fs.existsSync(fp)) {
+          try {
+            fs.unlinkSync(fp);
+          } catch (e) {
+            console.error(`Failed to remove ${file}:`, e);
           }
-        });
+        }
+      });
 
-        // Recreate using prisma db push
-        execSync("npx prisma db push --accept-data-loss", { stdio: "inherit" });
-        await prisma.$connect();
-        await seedDefaultDataIfEmpty();
-        console.log("✅ Database successfully recovered and seeded!");
-        return true;
-      } catch (recoveryErr) {
-        console.error("❌ Failed to recover database:", recoveryErr);
-        return false;
-      } finally {
-        isResetting = false;
-      }
+      // Recreate using prisma db push with explicit DATABASE_URL env
+      const targetDbUrl = `file:${dbPath}`;
+      execSync("npx prisma db push --accept-data-loss", {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          DATABASE_URL: targetDbUrl,
+        },
+      });
+
+      await prisma.$connect();
+      await seedDefaultDataIfEmpty();
+      console.log("✅ Database successfully recovered and seeded!");
+      return true;
+    } catch (recoveryErr) {
+      console.error("❌ Failed to recover database:", recoveryErr);
+      return false;
+    } finally {
+      isResetting = false;
     }
-    return false;
   }
 }
 

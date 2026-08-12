@@ -171,6 +171,8 @@ export default function App() {
   const [showAlignMemberSelector, setShowAlignMemberSelector] = useState<boolean>(false);
   const [alignMemberSearch, setAlignMemberSearch] = useState<string>("");
 
+  const [copiedFormationPositions, setCopiedFormationPositions] = useState<{ memberId: number; x: number; y: number }[] | null>(null);
+
   const toggleAlignMemberId = (mId: number) => {
     setAlignSelectedMemberIds((prev) =>
       prev.includes(mId) ? prev.filter((id) => id !== mId) : [...prev, mId]
@@ -764,10 +766,23 @@ export default function App() {
         targetX = ptA.x + (ptB.x - ptA.x) * t;
         targetY = ptA.y + (ptB.y - ptA.y) * t;
       } else if (alignType === "circle") {
-        // 真円 (アスペクト比補正適用で真円に配置)
-        const angle = (2 * Math.PI * index) / count - Math.PI / 2;
-        targetX = ptCenter.x + rad * Math.cos(angle);
-        targetY = ptCenter.y + rad * Math.sin(angle) * aspectRatio;
+        // 真円 (12時の方向から時計回りに配置、アスペクト比補正適用)
+        // 12時方向 = 角度 +PI/2, 時計回り = - (2*PI*index)/count
+        let effCenter = { ...ptCenter };
+        let effRad = rad;
+
+        if (snapToGrid || snapMode !== "none") {
+          // グリッドスナップオン時は中心・半径もスナップ
+          const stepX = 1 / totalCellsX;
+          const stepY = 1 / totalCellsY;
+          effCenter.x = Math.round(effCenter.x / stepX) * stepX;
+          effCenter.y = Math.round(effCenter.y / stepY) * stepY;
+          effRad = Math.round(effRad / stepX) * stepX;
+        }
+
+        const angle = Math.PI / 2 - (2 * Math.PI * index) / count;
+        targetX = effCenter.x + effRad * Math.cos(angle);
+        targetY = effCenter.y + effRad * Math.sin(angle) * aspectRatio;
       } else if (alignType === "arc") {
         // ドローイングツール風 円弧 (3点二次ベジェ補間: 端1 -> アーチ -> 端2)
         const t = count === 1 ? 0.5 : index / (count - 1);
@@ -1496,6 +1511,80 @@ export default function App() {
     }
   };
 
+  // セット個別テンポ(BPM)変更
+  const handleUpdateSetBpm = async (setId: number, bpm: number | undefined) => {
+    if (!activeFormation) return;
+
+    const updatedSets = activeFormation.sets.map((set) =>
+      set.id === setId ? { ...set, bpm: bpm && bpm > 0 ? bpm : undefined } : set
+    );
+    const updatedFormation = { ...activeFormation, sets: updatedSets };
+    setActiveFormation(updatedFormation);
+    setIsDirty(true);
+    localStorage.setItem(`drillflow_formation_${activeFormation.id}`, JSON.stringify(updatedFormation));
+
+    try {
+      await fetch(`/api/sets/${setId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bpm }),
+      });
+    } catch (error) {
+      console.error("Failed to update set bpm via API:", error);
+    }
+  };
+
+  // コマ表を跨いだ隊形コピペ: コピー
+  const handleCopySetPositions = (setId?: number) => {
+    const targetId = setId || selectedSetId;
+    if (!activeFormation || !targetId) return;
+    const targetSet = activeFormation.sets.find((s) => s.id === targetId);
+    if (!targetSet) return;
+
+    const positionsCopy = targetSet.positions.map((p) => ({
+      memberId: p.memberId,
+      x: p.x,
+      y: p.y,
+    }));
+    setCopiedFormationPositions(positionsCopy);
+    setSuccessMessage(`No.${targetSet.number} の隊形をコピーしました 📋`);
+    setTimeout(() => setSuccessMessage(""), 2500);
+  };
+
+  // コマ表を跨いだ隊形コピペ: ペースト
+  const handlePasteSetPositions = (targetSetId?: number) => {
+    const destSetId = targetSetId || selectedSetId;
+    if (!activeFormation || !destSetId || !copiedFormationPositions) return;
+
+    const targetSet = activeFormation.sets.find((s) => s.id === destSetId);
+    if (!targetSet) return;
+
+    saveEditorHistory();
+
+    const updatedSets = activeFormation.sets.map((s) => {
+      if (s.id !== destSetId) return s;
+      const existingMap = new Map(s.positions.map((p) => [p.memberId, p]));
+      copiedFormationPositions.forEach((cp) => {
+        existingMap.set(cp.memberId, {
+          memberId: cp.memberId,
+          setId: destSetId,
+          x: cp.x,
+          y: cp.y,
+        });
+      });
+      return {
+        ...s,
+        positions: Array.from(existingMap.values()),
+      };
+    });
+
+    const updatedFormation = { ...activeFormation, sets: updatedSets };
+    setActiveFormation(updatedFormation);
+    setIsDirty(true);
+    setSuccessMessage(`No.${targetSet.number} に隊形を貼り付けました 📋`);
+    setTimeout(() => setSuccessMessage(""), 2500);
+  };
+
   // API: セット複製 (Duplicate)
   const handleDuplicateSet = async (setId: number) => {
     if (!activeFormation) return;
@@ -2162,14 +2251,26 @@ export default function App() {
       // Ctrl / Cmd 組み合わせ
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase();
-        if (key === "c" && selectedDesignerMarkerId) {
-          e.preventDefault();
-          handleCopyMarker();
-          return;
-        } else if (key === "v" && copiedMarker) {
-          e.preventDefault();
-          handlePasteMarker();
-          return;
+        if (key === "c") {
+          if (selectedDesignerMarkerId) {
+            e.preventDefault();
+            handleCopyMarker();
+            return;
+          } else if (activeView === "editor" && selectedSetId) {
+            e.preventDefault();
+            handleCopySetPositions();
+            return;
+          }
+        } else if (key === "v") {
+          if (copiedMarker) {
+            e.preventDefault();
+            handlePasteMarker();
+            return;
+          } else if (activeView === "editor" && copiedFormationPositions) {
+            e.preventDefault();
+            handlePasteSetPositions();
+            return;
+          }
         } else if (key === "z") {
           e.preventDefault();
           if (e.shiftKey) {
@@ -2573,11 +2674,44 @@ export default function App() {
         {/* List of printable A4 pages */}
         <div className="flex flex-col gap-10 items-center w-full max-w-4xl">
           {activeFormation.sets.map((set, setIdx) => {
+            const prevSetObj = activeFormation.sets[setIdx - 1] || null;
             const nextSetObj = activeFormation.sets[setIdx + 1] || null;
             const setInsts = setInstructions[set.id] || [];
             const selMember = members.find((m) => m.id === selectedMemberId);
 
-            // 全員の指定 (all instructions for top section under No. and cts.)
+            // 全ての指定 (トップセクション表示用: グループ分けがある場合はグループ名:指定 の形式で全指定を表示)
+            const topInstsFormatted = setInsts.map((inst) => {
+              if (inst.targetType === "all") {
+                return {
+                  id: inst.id,
+                  text: inst.instructionText,
+                };
+              }
+
+              let label = inst.targetValue;
+              if (inst.targetType === "group") {
+                const setGrps = memberGroupsBySet[set.id] || [];
+                const grp =
+                  setGrps.find((g) => g.id === inst.targetValue || g.name === inst.targetValue) ||
+                  activeFormation.memberGroups?.find((g) => g.id === inst.targetValue || g.name === inst.targetValue);
+                if (grp) {
+                  label = grp.name;
+                }
+              } else if (inst.targetType === "individual") {
+                const targetMember = members.find(
+                  (m) => String(m.id) === inst.targetValue || m.name.toLowerCase() === inst.targetValue.toLowerCase()
+                );
+                if (targetMember) {
+                  label = getEffectiveMemberLabel(targetMember, members, memberCustomLabels) || targetMember.name;
+                }
+              }
+
+              return {
+                id: inst.id,
+                text: `${label}:${inst.instructionText}`,
+              };
+            });
+
             const allInsts = setInsts.filter((inst) => inst.targetType === "all");
 
             // 個人の指定 (individual member / group / instrument instructions for bottom section)
@@ -2609,41 +2743,44 @@ export default function App() {
               });
             }
 
+            // 部員選択時の下部指定テキスト: 個別指定がある場合はそれを優先、無ければ全体の指定 (allInsts) を表示
+            const bottomInsts = individualInsts.length > 0 ? individualInsts : allInsts;
+
             const valX = selMember ? (memberVariables[set.id]?.[selMember.id] ?? 0) : 0;
 
             return (
               <div
                 key={`print-page-${set.id}`}
-                className="print-page w-[210mm] h-[297mm] bg-white text-black p-[10mm] shadow-2xl flex flex-col justify-between relative rounded-none border border-slate-300"
+                className="print-page w-[210mm] h-[297mm] bg-white text-black px-[10mm] pt-[20mm] pb-[8mm] shadow-2xl flex flex-col justify-end items-center relative rounded-none border border-slate-300"
               >
                 {/* 1. TOP SECTION: Rotated 180 degrees */}
-                <div className="rotate-180 w-full shrink-0 mb-2 flex flex-col justify-end pt-12">
-                  {/* 横線 (DOM一番上 -> 180度回転で一番下: コマ表の上部端の直上) */}
-                  <div className="w-full border-b-2 border-black mb-1.5" />
+                <div className="rotate-180 w-full shrink-0 flex flex-col justify-end">
+                  {/* Visually BOTTOM: 横線 (DOM 1番目 -> 180度回転でコマ表直上) */}
+                  <div className="w-full border-b-2 border-black mb-1" />
 
-                  {/* Header: No. {set.number}　cts. {set.counts} (DOM中央 -> 180度回転で中央) */}
-                  <div className="flex items-center justify-between py-1 mb-1">
-                    <div className="text-3xl md:text-4xl font-black text-black tracking-wide">
-                      No. {set.number}　cts. {set.counts}
+                  {/* Visually MIDDLE: Header: No. {set.number}　cts. {set.counts} (DOM 2番目 -> 180度回転でBuild 16の直下) */}
+                  <div className="flex items-center justify-between py-0.5 mb-0.5">
+                    <div className="text-3xl md:text-4xl font-black text-black tracking-wide flex items-center gap-4 flex-wrap">
+                      <span>No. {set.number}　cts. {set.counts}</span>
                     </div>
                   </div>
 
-                  {/* 全体指示 (例: Build 16) (DOM一番下 -> 180度回転で一番上) */}
-                  {allInsts.length > 0 && (
-                    <div className="mt-1 flex flex-wrap items-center gap-x-6 gap-y-2">
-                      {allInsts.map((inst) => (
+                  {/* Visually TOP: 全体指示 (グループ指定含む全指示テキスト) (DOM 3番目 -> 180度回転で紙面最上部) */}
+                  {topInstsFormatted.length > 0 && (
+                    <div className="py-0.5 mb-0.5 flex flex-wrap items-center gap-x-6 gap-y-1">
+                      {topInstsFormatted.map((inst) => (
                         <div key={inst.id} className="text-3xl md:text-4xl font-black text-black tracking-tight">
-                          <span>{inst.instructionText}</span>
+                          <span>{inst.text}</span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* 2. MIDDLE/LOWER SECTION: Field map (コマ表) - shifted towards bottom */}
-                <div className="flex-1 mt-1 mb-2 flex items-end justify-center w-full overflow-hidden">
+                {/* 2. MIDDLE/LOWER SECTION: Field map (コマ表) - centered with minimal vertical gap */}
+                <div className="w-full my-1 flex items-center justify-center overflow-hidden">
                   <div
-                    className="relative rounded-none overflow-hidden marching-canvas-print select-none"
+                    className="relative rounded-none overflow-hidden marching-canvas-print select-none rotate-180 border-2 border-black"
                     style={{
                       aspectRatio: `${activeFormation.fieldWidth || 150}/${activeFormation.fieldHeight || 150}`,
                       width: "100%",
@@ -2757,12 +2894,12 @@ export default function App() {
                     {/* Draw member positions in print view */}
                     {members.map((m) => {
                       const curPos = set.positions.find((p) => p.memberId === m.id);
-                      const nextPos = nextSetObj?.positions.find((p) => p.memberId === m.id);
+                      const prevPos = prevSetObj?.positions.find((p) => p.memberId === m.id);
 
-                      const x1 = curPos ? curPos.x : 0.5;
-                      const y1 = curPos ? curPos.y : 0.5;
-                      const x2 = nextPos ? nextPos.x : x1;
-                      const y2 = nextPos ? nextPos.y : y1;
+                      const curX = curPos ? curPos.x : 0.5;
+                      const curY = curPos ? curPos.y : 0.5;
+                      const prevX = prevPos ? prevPos.x : curX;
+                      const prevY = prevPos ? prevPos.y : curY;
 
                       const isSelected = selectedMemberId === m.id;
                       const mLabel = getEffectiveMemberLabel(m, members, memberCustomLabels);
@@ -2773,51 +2910,52 @@ export default function App() {
                           <div
                             className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center pointer-events-none z-20"
                             style={{
-                              left: `${x1 * 100}%`,
-                              top: `${(1 - y1) * 100}%`,
+                              left: `${curX * 100}%`,
+                              top: `${(1 - curY) * 100}%`,
                             }}
                           >
                             <div
-                              className={`rounded-full ${
-                                isSelected ? "w-2.5 h-2.5 bg-blue-600 ring-2 ring-blue-600 z-50" : "w-2 h-2"
-                              }`}
-                              style={{ backgroundColor: m.color || "#000000" }}
+                              className="w-1.5 h-1.5 rounded-full bg-black"
+                              style={{ backgroundColor: "#000000" }}
                               title={mLabel}
                             />
                             {showMemberLabels && (
                               <span
-                                className={`absolute top-full left-1/2 -translate-x-1/2 text-[9px] font-mono font-bold leading-none text-black whitespace-nowrap select-none -mt-0.5 ${
-                                  isSelected ? "font-extrabold text-blue-700 underline" : ""
+                                className={`absolute top-full left-1/2 -translate-x-1/2 font-mono leading-none text-black whitespace-nowrap select-none pt-0.5 ${
+                                  isSelected
+                                    ? "text-[12px] font-extrabold z-30"
+                                    : "text-[12px] font-extrabold"
                                 }`}
+                                style={{ color: "#000000" }}
                               >
                                 {mLabel}
                               </span>
                             )}
                           </div>
 
-                          {/* Arrow to next set position for selected member */}
-                          {nextSetObj && (x1 !== x2 || y1 !== y2) && isSelected && (
+                          {/* Arrow from previous set position to current set position for selected member */}
+                          {prevSetObj && (prevX !== curX || prevY !== curY) && isSelected && (
                             <svg className="absolute inset-0 w-full h-full pointer-events-none z-40">
                               <defs>
                                 <marker
                                   id={`arrow-print-${set.id}-${m.id}`}
                                   viewBox="0 0 10 10"
-                                  refX="5"
+                                  refX="10"
                                   refY="5"
-                                  markerWidth="5"
-                                  markerHeight="5"
-                                  orient="auto-start-reverse"
+                                  markerWidth="6"
+                                  markerHeight="6"
+                                  orient="auto"
                                 >
                                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
                                 </marker>
                               </defs>
                               <line
-                                x1={`${x1 * 100}%`}
-                                y1={`${(1 - y1) * 100}%`}
-                                x2={`${x2 * 100}%`}
-                                y2={`${(1 - y2) * 100}%`}
+                                x1={`${prevX * 100}%`}
+                                y1={`${(1 - prevY) * 100}%`}
+                                x2={`${curX * 100}%`}
+                                y2={`${(1 - curY) * 100}%`}
                                 stroke="#2563eb"
-                                strokeWidth={2.8}
+                                strokeWidth={2}
                                 markerEnd={`url(#arrow-print-${set.id}-${m.id})`}
                               />
                             </svg>
@@ -2829,14 +2967,14 @@ export default function App() {
                 </div>
 
                 {/* 3. BOTTOM SECTION: Rotated 180 degrees at bottom of paper */}
-                <div className="rotate-180 w-full shrink-0 mt-2">
-                  <div className="flex items-center justify-between text-black py-1 mb-1">
+                <div className="rotate-180 w-full shrink-0">
+                  <div className="flex items-center justify-between text-black py-0.5 mb-0.5">
                     <div className="flex items-center gap-6 flex-wrap">
                       <span className="font-black text-3xl md:text-4xl text-black">No. {set.number}</span>
-                      {/* 選択した個人の指定のみ (指定テキストを大きく表示) */}
-                      {selMember && individualInsts.length > 0 && (
+                      {/* 選択した個人の指定（グループ指定が無ければ全体の指定） */}
+                      {selMember && bottomInsts.length > 0 && (
                         <span className="text-3xl md:text-4xl font-black text-black tracking-wide">
-                          {individualInsts
+                          {bottomInsts
                             .map((inst) => evaluateInstructionFormula(inst.instructionText, valX))
                             .join("  ")}
                         </span>
@@ -2845,7 +2983,7 @@ export default function App() {
                   </div>
 
                   {/* 横線 (コマ表側 = 180度回転後はコマ表の直下) */}
-                  <div className="w-full border-b-2 border-black mt-0.5" />
+                  <div className="w-full border-b-2 border-black mt-1" />
                 </div>
               </div>
             );
@@ -3905,22 +4043,41 @@ export default function App() {
                         : "border border-slate-200 opacity-80 hover:opacity-100 hover:border-slate-300"
                     }`}
                   >
-                    <div className="flex justify-between items-start mb-1">
+                    <div className="flex justify-between items-start mb-1 flex-wrap gap-1">
                       <span className={`text-[10px] font-bold ${isActive ? "text-blue-600" : "text-slate-400"}`}>
                         No. {set.number}
                       </span>
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <span className="text-[9px] text-slate-400 font-mono">Count:</span>
-                        <input
-                          type="number"
-                          value={set.counts}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 16;
-                            handleUpdateSetCounts(set.id, val);
-                          }}
-                          className="w-12 bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-700 px-1 py-0.5 rounded text-center focus:outline-none focus:border-blue-500 font-mono"
-                          min="1"
-                        />
+                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-0.5">
+                          <span className="text-[9px] text-slate-400 font-mono">BPM:</span>
+                          <input
+                            type="number"
+                            placeholder={String(activeFormation.bpm || 120)}
+                            value={set.bpm || ""}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              handleUpdateSetBpm(set.id, isNaN(val) ? undefined : val);
+                            }}
+                            className="w-11 bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-700 px-1 py-0.5 rounded text-center focus:outline-none focus:border-blue-500 font-mono"
+                            min="30"
+                            max="300"
+                            title="このNo.のテンポ(BPM)"
+                          />
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          <span className="text-[9px] text-slate-400 font-mono">Count:</span>
+                          <input
+                            type="number"
+                            value={set.counts}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 16;
+                              handleUpdateSetCounts(set.id, val);
+                            }}
+                            className="w-11 bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-700 px-1 py-0.5 rounded text-center focus:outline-none focus:border-blue-500 font-mono"
+                            min="1"
+                            title="このNo.のカウント数"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="flex justify-between items-center mt-1">
@@ -3928,12 +4085,9 @@ export default function App() {
                         {set.number === 0 ? "初期隊形" : `No. ${set.number}`}
                       </div>
                       {/* セットに対するクイック操作 (複製、削除) */}
-                      <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDuplicateSet(set.id);
-                          }}
+                          onClick={() => handleDuplicateSet(set.id)}
                           className="p-1 hover:bg-slate-200 text-slate-500 hover:text-slate-800 rounded transition"
                           title="No.を複製"
                         >
